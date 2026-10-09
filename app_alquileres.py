@@ -1,5 +1,6 @@
 
-import streamlit as st
+
+      import streamlit as st
 import sqlite3
 import datetime
 import pandas as pd
@@ -14,7 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Estética Visual "Dark SaaS Pro" Definitiva ---
+# --- Estética Visual "Dark SaaS Pro" Definitiva (Con corrección de TextAreas) ---
 st.markdown("""
     <style>
     /* Fondo general oscuro estilo panel corporativo */
@@ -36,6 +37,14 @@ st.markdown("""
         color: #e2e8f0 !important;
         font-weight: 600 !important;
         font-size: 14px !important;
+    }
+    
+    /* CORRECCIÓN CRÍTICA: Forzar fondo oscuro y letra blanca en TODOS los text_area (cuadros grandes de texto) */
+    textarea, .stTextArea textarea {
+        background-color: #131c2a !important;
+        color: #ffffff !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
     }
     
     /* Barra lateral institucional oscura tipo SaaS */
@@ -498,7 +507,7 @@ En prueba de conformidad, se firman dos ejemplares de un mismo tenor y a un solo
         st.subheader("👁️ Vista Previa y Edición Fina del Contrato")
         texto_editado = st.text_area("Contrato Editable:", value=contrato_modelo_base, height=350)
 
-        if st.button("📥 Generar y Descargar Contrato en formato Word (.docx)"):
+        if st.button("📥 Generar y Descargar Contrato in formato Word (.docx)"):
             doc = Document()
             doc.add_heading(f"Contrato - {p_c_info['nombre_propiedad']}", level=1)
             for parrafo in texto_editado.split("\n\n"):
@@ -549,4 +558,3 @@ elif opcion == "🗑️ Eliminar Propiedad":
             else:
                 st.warning("Por favor, marcá la casilla de confirmación para habilitar la eliminación.")
     st.markdown("</div>", unsafe_allow_html=True)
-        
