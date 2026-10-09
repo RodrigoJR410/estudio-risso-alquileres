@@ -163,9 +163,7 @@ def inicializar_bd():
 
 inicializar_bd()
 
-# --- Menú Lateral y Control de Acceso Privado ---
-CONTRASENIA_ADMIN = "risso2026"  # Podes cambiar esta clave por la que vos quieras
-
+# --- Menú Lateral Profesional Dark ---
 with st.sidebar:
     st.markdown("""
         <div style='text-align: center; padding: 20px 10px; background: linear-gradient(135deg, #162235 0%, #0e1621 100%); border-radius: 10px; border: 1px solid #1e293b; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);'>
@@ -176,18 +174,6 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
     
-    st.markdown("---")
-    st.subheader("🔐 Acceso Privado")
-    clave_ingresada = st.text_input("Contraseña de Administrador:", type="password")
-    
-    modo_admin = False
-    if clave_ingresada == CONTRASENIA_ADMIN:
-        modo_admin = True
-        st.success("🟢 Modo Propietario Activo")
-    elif clave_ingresada != "":
-        st.error("🔴 Clave incorrecta")
-
-    st.markdown("---")
     opcion = st.radio("Navegación del Sistema:", [
         "📊 Panel y Gráficos", 
         "➕ Cargar Propiedad", 
@@ -199,11 +185,7 @@ with st.sidebar:
     ])
 
 conn = obtener_conexion()
-if modo_admin:
-    df_alquileres = pd.read_sql("SELECT * FROM alquileres", conn)
-else:
-    # Si entra público, mostramos una tabla vacía o un par de datos genéricos de prueba ficticios
-    df_alquileres = pd.DataFrame(columns=['id', 'nombre_propiedad', 'direccion', 'inquilino', 'precio_alquiler', 'fecha_inicio', 'fecha_fin', 'honorarios_cobrados', 'monto_honorarios', 'notas'])
+df_alquileres = pd.read_sql("SELECT * FROM alquileres", conn)
 conn.close()
 
 hoy = datetime.date.today()
@@ -217,11 +199,8 @@ if opcion == "📊 Panel y Gráficos":
         </div>
     """, unsafe_allow_html=True)
     
-    if not modo_admin:
-        st.warning("🔒 Estás viendo la versión pública de demostración. Ingresá tu contraseña en la barra lateral para acceder a los datos privados del estudio.")
-
     if df_alquileres.empty:
-        st.info("No hay propiedades cargadas para visualizar en este momento.")
+        st.info("Todavía no hay propiedades cargadas en el sistema. Utiliza la sección '➕ Cargar Propiedad' para comenzar.")
     else:
         total_propiedades = len(df_alquileres)
         recaudacion_potencial = df_alquileres['precio_alquiler'].sum()
@@ -266,103 +245,104 @@ if opcion == "📊 Panel y Gráficos":
         st.dataframe(df_alquileres[['nombre_propiedad', 'direccion', 'inquilino', 'precio_alquiler', 'fecha_fin']], use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-elif opcion == "➕ Cargar Propiedad":
-    if not modo_admin:
-        st.error("🔒 Se requiere ingresar la contraseña de Administrador en la barra lateral para registrar nuevas propiedades.")
-    else:
         st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-        st.header("➕ Cargar Nueva Propiedad y Contrato")
-        
-        with st.form("form_carga"):
-            col1, col2 = st.columns(2)
-            with col1:
-                nombre = st.text_input("Nombre / Identificación de la Propiedad *")
-                direccion = st.text_input("Dirección *")
-                inquilino = st.text_input("Nombre del Inquilino")
-                precio = st.number_input("Precio Inicial del Alquiler ($)", min_value=0.0, step=1000.0)
-            
-            with col2:
-                f_inicio = st.date_input("Fecha Inicio Contrato", value=hoy)
-                f_fin = st.date_input("Fecha Fin Contrato", value=hoy + datetime.timedelta(days=365))
-                honorarios_si = st.checkbox("¿Se cobraron honorarios de redacción?")
-                monto_hon = st.number_input("Monto Honorarios ($)", min_value=0.0, step=500.0)
-                
-            notas = st.text_area("Notas Adicionales (Cláusulas especiales, CBU, etc.)")
-            
-            submitted = st.form_submit_button("Guardar Propiedad en el Sistema")
-            if submitted:
-                if not nombre or not direccion:
-                    st.error("El nombre de la propiedad y la dirección son obligatorios.")
-                else:
-                    conn = obtener_conexion()
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        INSERT INTO alquileres (nombre_propiedad, direccion, inquilino, precio_alquiler, fecha_inicio, fecha_fin, honorarios_cobrados, monto_honorarios, notas)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (nombre, direccion, inquilino, precio, str(f_inicio), str(f_fin), 1 if honorarios_si else 0, monto_hon, notas))
-                    conn.commit()
-                    conn.close()
-                    st.success("¡Propiedad y contrato guardados con éxito!")
-                    st.rerun()
+        st.subheader("📈 Distribución de Ingresos por Inmueble")
+        if not df_alquileres.empty:
+            chart_data = df_alquileres.set_index('nombre_propiedad')[['precio_alquiler']]
+            st.bar_chart(chart_data)
         st.markdown("</div>", unsafe_allow_html=True)
+
+elif opcion == "➕ Cargar Propiedad":
+    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+    st.header("➕ Cargar Nueva Propiedad y Contrato")
+    
+    with st.form("form_carga"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nombre = st.text_input("Nombre / Identificación de la Propiedad *")
+            direccion = st.text_input("Dirección *")
+            inquilino = st.text_input("Nombre del Inquilino")
+            precio = st.number_input("Precio Inicial del Alquiler ($)", min_value=0.0, step=1000.0)
+        
+        with col2:
+            f_inicio = st.date_input("Fecha Inicio Contrato", value=hoy)
+            f_fin = st.date_input("Fecha Fin Contrato", value=hoy + datetime.timedelta(days=365))
+            honorarios_si = st.checkbox("¿Se cobraron honorarios de redacción?")
+            monto_hon = st.number_input("Monto Honorarios ($)", min_value=0.0, step=500.0)
+            
+        notas = st.text_area("Notas Adicionales (Cláusulas especiales, CBU, etc.)")
+        
+        submitted = st.form_submit_button("Guardar Propiedad en el Sistema")
+        if submitted:
+            if not nombre or not direccion:
+                st.error("El nombre de la propiedad y la dirección son obligatorios.")
+            else:
+                conn = obtener_conexion()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO alquileres (nombre_propiedad, direccion, inquilino, precio_alquiler, fecha_inicio, fecha_fin, honorarios_cobrados, monto_honorarios, notas)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (nombre, direccion, inquilino, precio, str(f_inicio), str(f_fin), 1 if honorarios_si else 0, monto_hon, notas))
+                conn.commit()
+                conn.close()
+                st.success("¡Propiedad y contrato guardados con éxito!")
+                st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "📈 Actualizar Precios e Historial":
-    if not modo_admin:
-        st.error("🔒 Área protegida. Ingresá la contraseña en la barra lateral.")
+    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+    st.header("📈 Historial y Actualizaciones de Precios")
+    
+    if df_alquileres.empty:
+        st.info("No hay propiedades cargadas.")
     else:
-        st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-        st.header("📈 Historial y Actualizaciones de Precios")
+        propiedad_seleccionada = st.selectbox(
+            "Seleccioná la propiedad:",
+            df_alquileres['nombre_propiedad'].tolist()
+        )
         
-        if df_alquileres.empty:
-            st.info("No hay propiedades cargadas.")
-        else:
-            propiedad_seleccionada = st.selectbox(
-                "Seleccioná la propiedad:",
-                df_alquileres['nombre_propiedad'].tolist()
-            )
+        prop_info = df_alquileres[df_alquileres['nombre_propiedad'] == propiedad_seleccionada].iloc[0]
+        alq_id = prop_info['id']
+        
+        st.markdown(f"**Dirección:** {prop_info['direccion']} &nbsp;|&nbsp; **Precio Vigente:** <span style='color:#10b981; font-weight:bold;'>${prop_info['precio_alquiler']:,.2f}</span>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        with st.form("form_precio"):
+            st.subheader("Registrar Nuevo Ajuste")
+            nuevo_precio = st.number_input("Nuevo Monto ($)", min_value=0.0, step=1000.0)
+            fecha_act = st.date_input("Fecha de Actualización", value=hoy)
+            motivo = st.text_input("Motivo / Índice:", value="Actualización ICL / Cuatrimestral")
             
-            prop_info = df_alquileres[df_alquileres['nombre_propiedad'] == propiedad_seleccionada].iloc[0]
-            alq_id = prop_info['id']
-            
-            st.markdown(f"**Dirección:** {prop_info['direccion']} &nbsp;|&nbsp; **Precio Vigente:** <span style='color:#10b981; font-weight:bold;'>${prop_info['precio_alquiler']:,.2f}</span>", unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            with st.form("form_precio"):
-                st.subheader("Registrar Nuevo Ajuste")
-                nuevo_precio = st.number_input("Nuevo Monto ($)", min_value=0.0, step=1000.0)
-                fecha_act = st.date_input("Fecha de Actualización", value=hoy)
-                motivo = st.text_input("Motivo / Índice:", value="Actualización ICL / Cuatrimestral")
-                
-                if st.form_submit_button("Guardar Actualización"):
-                    conn = obtener_conexion()
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
-                        VALUES (?, ?, ?, ?)
-                    ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
-                    cursor.execute('UPDATE alquileres SET precio_alquiler = ? WHERE id = ?', (nuevo_precio, alq_id))
-                    conn.commit()
-                    conn.close()
-                    st.success("¡Actualización guardada correctamente!")
-                    st.rerun()
+            if st.form_submit_button("Guardar Actualización"):
+                conn = obtener_conexion()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
+                    VALUES (?, ?, ?, ?)
+                ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
+                cursor.execute('UPDATE alquileres SET precio_alquiler = ? WHERE id = ?', (nuevo_precio, alq_id))
+                conn.commit()
+                conn.close()
+                st.success("¡Actualización guardada correctamente!")
+                st.rerun()
 
-            st.divider()
-            st.subheader("Historial Registrado")
-            conn = obtener_conexion()
-            df_hist = pd.read_sql(f"SELECT fecha_actualizacion AS Fecha, nuevo_precio AS 'Nuevo Precio ($)', motivo AS Motivo FROM actualizaciones_precio WHERE alquiler_id = {alq_id} ORDER BY fecha_actualizacion DESC", conn)
-            conn.close()
-            if df_hist.empty:
-                st.write("Sin registros previos.")
-            else:
-                st.dataframe(df_hist, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.divider()
+        st.subheader("Historial Registrado")
+        conn = obtener_conexion()
+        df_hist = pd.read_sql(f"SELECT fecha_actualizacion AS Fecha, nuevo_precio AS 'Nuevo Precio ($)', motivo AS Motivo FROM actualizaciones_precio WHERE alquiler_id = {alq_id} ORDER BY fecha_actualizacion DESC", conn)
+        conn.close()
+        if df_hist.empty:
+            st.write("Sin registros previos.")
+        else:
+            st.dataframe(df_hist, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "🧮 Calculadora de Ajustes (ICL/IPC)":
     st.markdown("<div class='content-card'>", unsafe_allow_html=True)
     st.header("🧮 Calculadora de Actualización de Alquileres")
     
     if df_alquileres.empty:
-        st.info("Cargá una propiedad o ingresá como administrador para simular ajustes.")
+        st.info("Cargá primero una propiedad para realizar cálculos.")
     else:
         prop_sel = st.selectbox("Seleccionar Inmueble para simular ajuste:", df_alquileres['nombre_propiedad'].tolist())
         p_info = df_alquileres[df_alquileres['nombre_propiedad'] == prop_sel].iloc[0]
@@ -395,50 +375,47 @@ elif opcion == "🧮 Calculadora de Ajustes (ICL/IPC)":
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "💵 Control de Pagos y Recibos":
-    if not modo_admin:
-        st.error("🔒 Área protegida. Ingresá la contraseña en la barra lateral.")
+    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+    st.header("💵 Control de Pagos Mensuales y Emisión de Recibos")
+    
+    if df_alquileres.empty:
+        st.info("No hay propiedades registradas.")
     else:
-        st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-        st.header("💵 Control de Pagos Mensuales y Emisión de Recibos")
+        p_pago = st.selectbox("Seleccionar Propiedad para Estado de Cuenta:", df_alquileres['nombre_propiedad'].tolist(), key="p_pago_sel")
+        prop_reg = df_alquileres[df_alquileres['nombre_propiedad'] == p_pago].iloc[0]
+        alq_id_pago = prop_reg['id']
         
-        if df_alquileres.empty:
-            st.info("No hay propiedades registradas.")
-        else:
-            p_pago = st.selectbox("Seleccionar Propiedad para Estado de Cuenta:", df_alquileres['nombre_propiedad'].tolist(), key="p_pago_sel")
-            prop_reg = df_alquileres[df_alquileres['nombre_propiedad'] == p_pago].iloc[0]
-            alq_id_pago = prop_reg['id']
+        mes_actual_str = datetime.date.today().strftime("%Y-%m")
+        
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            mes_input = st.text_input("Mes y Año del Periodo (YYYY-MM):", value=mes_actual_str)
+            estado_pago = st.selectbox("Estado del Pago:", ["Pagado 🟢", "Pendiente 🔴", "Atrasado ⚠️"])
+        with col_p2:
+            monto_pago = st.number_input("Monto Abonado ($):", value=float(prop_reg['precio_alquiler']), min_value=0.0)
+            fecha_pago_efectiva = st.date_input("Fecha de Efectivización:", value=hoy)
             
-            mes_actual_str = datetime.date.today().strftime("%Y-%m")
-            
-            col_p1, col_p2 = st.columns(2)
-            with col_p1:
-                mes_input = st.text_input("Mes y Año del Periodo (YYYY-MM):", value=mes_actual_str)
-                estado_pago = st.selectbox("Estado del Pago:", ["Pagado 🟢", "Pendiente 🔴", "Atrasado ⚠️"])
-            with col_p2:
-                monto_pago = st.number_input("Monto Abonado ($):", value=float(prop_reg['precio_alquiler']), min_value=0.0)
-                fecha_pago_efectiva = st.date_input("Fecha de Efectivización:", value=hoy)
-                
-            if st.button("Registrar / Actualizar Estado de Pago"):
-                conn = obtener_conexion()
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM pagos_mensuales WHERE alquiler_id = ? AND mes_anio = ?", (alq_id_pago, mes_input))
-                existe = cursor.fetchone()
-                if existe:
-                    cursor.execute("UPDATE pagos_mensuales SET estado = ?, monto = ?, fecha_pago = ? WHERE id = ?", 
-                                   (estado_pago, monto_pago, str(fecha_pago_efectiva), existe[0]))
-                else:
-                    cursor.execute("INSERT INTO pagos_mensuales (alquiler_id, mes_anio, estado, monto, fecha_pago) VALUES (?, ?, ?, ?, ?)",
-                                   (alq_id_pago, mes_input, estado_pago, monto_pago, str(fecha_pago_efectiva)))
-                conn.commit()
-                conn.close()
-                st.success("¡Registro de pago actualizado con éxito!")
-                st.rerun()
+        if st.button("Registrar / Actualizar Estado de Pago"):
+            conn = obtener_conexion()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM pagos_mensuales WHERE alquiler_id = ? AND mes_anio = ?", (alq_id_pago, mes_input))
+            existe = cursor.fetchone()
+            if existe:
+                cursor.execute("UPDATE pagos_mensuales SET estado = ?, monto = ?, fecha_pago = ? WHERE id = ?", 
+                               (estado_pago, monto_pago, str(fecha_pago_efectiva), existe[0]))
+            else:
+                cursor.execute("INSERT INTO pagos_mensuales (alquiler_id, mes_anio, estado, monto, fecha_pago) VALUES (?, ?, ?, ?, ?)",
+                               (alq_id_pago, mes_input, estado_pago, monto_pago, str(fecha_pago_efectiva)))
+            conn.commit()
+            conn.close()
+            st.success("¡Registro de pago actualizado con éxito!")
+            st.rerun()
 
-            st.divider()
-            st.subheader("📲 Generador de Recibo Digital para WhatsApp")
-            
-            inquilino_nombre = prop_reg['inquilino'] if prop_reg['inquilino'] else "[Nombre Inquilino]"
-            texto_whatsapp = f"""*RECIBO DE PAGO - ALQUILER* 🏠
+        st.divider()
+        st.subheader("📲 Generador de Recibo Digital para WhatsApp")
+        
+        inquilino_nombre = prop_reg['inquilino'] if prop_reg['inquilino'] else "[Nombre Inquilino]"
+        texto_whatsapp = f"""*RECIBO DE PAGO - ALQUILER* 🏠
 -----------------------------------
 *Propiedad:* {prop_reg['nombre_propiedad']}
 *Dirección:* {prop_reg['direccion']}
@@ -450,15 +427,15 @@ elif opcion == "💵 Control de Pagos y Recibos":
 -----------------------------------
 _Estudio Jurídico Risso - Gestión Inmobiliaria_"""
 
-            st.text_area("Copiá este mensaje y envíaselo por WhatsApp al inquilino:", value=texto_whatsapp, height=180)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.text_area("Copiá este mensaje y envíaselo por WhatsApp al inquilino:", value=texto_whatsapp, height=180)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "📝 Generador de Contratos":
     st.markdown("<div class='content-card'>", unsafe_allow_html=True)
     st.header("📝 Generador Automático de Contratos de Locación (.docx)")
     
     if df_alquileres.empty:
-        st.info("No hay propiedades registradas. Ingresá tu contraseña de administrador en la barra lateral para ver tus inmuebles.")
+        st.info("No hay propiedades registradas para generar contratos.")
     else:
         prop_c = st.selectbox("Seleccionar Inmueble para el Contrato:", df_alquileres['nombre_propiedad'].tolist(), key="prop_contrato")
         p_c_info = df_alquileres[df_alquileres['nombre_propiedad'] == prop_c].iloc[0]
@@ -535,34 +512,32 @@ En prueba de conformidad, se firman dos ejemplares de un mismo tenor y a un solo
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "🗑️ Eliminar Propiedad":
-    if not modo_admin:
-        st.error("🔒 Área protegida. Ingresá la contraseña en la barra lateral.")
+    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+    st.header("🗑️ Baja de Propiedades y Contratos")
+    
+    if df_alquileres.empty:
+        st.info("No hay propiedades registradas en la base de datos.")
     else:
-        st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-        st.header("🗑️ Baja de Propiedades y Contratos")
+        prop_a_borrar = st.selectbox("Seleccioná la propiedad que querés dar de baja:", df_alquileres['nombre_propiedad'].tolist())
+        p_del_info = df_alquileres[df_alquileres['nombre_propiedad'] == prop_a_borrar].iloc[0]
+        prop_id = p_del_info['id']
         
-        if df_alquileres.empty:
-            st.info("No hay propiedades registradas en la base de datos.")
-        else:
-            prop_a_borrar = st.selectbox("Seleccioná la propiedad que querés dar de baja:", df_alquileres['nombre_propiedad'].tolist())
-            p_del_info = df_alquileres[df_alquileres['nombre_propiedad'] == prop_a_borrar].iloc[0]
-            prop_id = p_del_info['id']
-            
-            st.error(f"⚠️ Atención: Estás por eliminar el registro de **{p_del_info['nombre_propiedad']}** (Dirección: {p_del_info['direccion']}). Esta acción también borrará su historial de precios y pagos asociados.")
-            
-            confirmacion = st.checkbox("Confirmo que deseo dar de baja definitivamente este inmueble.")
-            
-            if st.button("Eliminar Inmueble de Data Base"):
-                if confirmacion:
-                    conn = obtener_conexion()
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM actualizaciones_precio WHERE alquiler_id = ?", (prop_id,))
-                    cursor.execute("DELETE FROM pagos_mensuales WHERE alquiler_id = ?", (prop_id,))
-                    cursor.execute("DELETE FROM alquileres WHERE id = ?", (prop_id,))
-                    conn.commit()
-                    conn.close()
-                    st.success("¡Propiedad eliminada correctamente!")
-                    st.rerun()
-                else:
-                    st.warning("Por favor, marcá la casilla de confirmación para habilitar la eliminación.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.error(f"⚠️ Atención: Estás por eliminar el registro de **{p_del_info['nombre_propiedad']}** (Dirección: {p_del_info['direccion']}). Esta acción también borrará su historial de precios y pagos asociados.")
+        
+        confirmacion = st.checkbox("Confirmo que deseo dar de baja definitivamente este inmueble.")
+        
+        if st.button("Eliminar Inmueble de la Base de Datos"):
+            if confirmacion:
+                conn = obtener_conexion()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM actualizaciones_precio WHERE alquiler_id = ?", (prop_id,))
+                cursor.execute("DELETE FROM pagos_mensuales WHERE alquiler_id = ?", (prop_id,))
+                cursor.execute("DELETE FROM alquileres WHERE id = ?", (prop_id,))
+                conn.commit()
+                conn.close()
+                st.success("¡Propiedad eliminada correctamente!")
+                st.rerun()
+            else:
+                st.warning("Por favor, marcá la casilla de confirmación para habilitar la eliminación.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
