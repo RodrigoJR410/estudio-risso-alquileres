@@ -36,7 +36,7 @@ def inicializar_bd():
         )
     ''')
     
-    # Tabla de Usuarios (con estado de aprobación y permisos de rol)
+    # Tabla de Usuarios
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +52,17 @@ def inicializar_bd():
         )
     ''')
     
+    # Asegurar compatibilidad agregando columnas si la base de datos ya existía previamente
+    cursor.execute("PRAGMA table_info(usuarios)")
+    columnas_existentes = [col[1] for col in cursor.fetchall()]
+    
+    if "es_admin_org" not in columnas_existentes:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN es_admin_org INTEGER DEFAULT 0")
+    if "permiso_escritura" not in columnas_existentes:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN permiso_escritura INTEGER DEFAULT 1")
+    if "aprobado" not in columnas_existentes:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN aprobado INTEGER DEFAULT 1") # True por defecto para cuentas viejas
+        
     # Tabla de Alquileres
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alquileres (
@@ -95,7 +106,7 @@ def inicializar_bd():
         )
     ''')
     
-    # Crear cuenta Superadministrador por defecto (aprobada automáticamente)
+    # Crear cuenta Superadministrador por defecto si no existe
     cursor.execute("SELECT COUNT(*) FROM usuarios WHERE es_admin_general = 1")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT OR IGNORE INTO organizaciones (nombre_org) VALUES ('Plataforma Central')")
@@ -265,11 +276,9 @@ if st.session_state['usuario_logueado'] is None:
                         try:
                             conn = obtener_conexion()
                             cursor = conn.cursor()
-                            # 1. Crear organización
                             cursor.execute("INSERT INTO organizaciones (nombre_org) VALUES (?)", (reg_org,))
                             org_id = cursor.lastrowid
                             
-                            # 2. Crear usuario como admin de su org pero pendiente de aprobación general (aprobado = 0)
                             pass_h = encriptar_password(reg_pass)
                             cursor.execute('''
                                 INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado)
@@ -309,11 +318,9 @@ with st.sidebar:
         "🗑️ Eliminar Propiedad"
     ]
     
-    # Si es administrador de organización o general, puede gestionar sus colaboradores
     if user_info['es_admin_general'] == 1 or user_info['es_admin_org'] == 1:
         menu_opciones.append("👥 Gestión de Miembros del Equipo")
         
-    # Si es el Administrador General de la plataforma, ve el panel de aprobación global
     if user_info['es_admin_general'] == 1:
         menu_opciones.append("🛡️ Aprobación de Cuentas (Admin)")
 
@@ -324,7 +331,6 @@ with st.sidebar:
         st.session_state['usuario_logueado'] = None
         st.rerun()
 
-# Cargar datos filtrados por la organización
 conn = obtener_conexion()
 df_alquileres = pd.read_sql("SELECT * FROM alquileres WHERE organizacion_id = ?", conn, params=(org_id_actual,))
 conn.close()
