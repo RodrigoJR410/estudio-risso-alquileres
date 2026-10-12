@@ -652,4 +652,21 @@ elif opcion == "🗑️ Eliminar Propiedad":
                     conn.close()
                     st.success("¡Propiedad eliminada!")
                     st.rerun()
-                else
+                else:
+                    st.warning("Marcá la casilla de confirmación.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+elif opcion == "👑 Panel Maestro (Control Global)" and user_info['es_admin_general'] == 1 and user_info['email'] == "admin@gestor.com":
+    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+    st.header("👑 Panel de Control Maestro (Superadministrador)")
+    
+    tab_orgs, tab_solicitudes, tab_usuarios, tab_gestion_usuarios = st.tabs([
+        "🏢 Organismos", 
+        "🔔 Solicitudes", 
+        "👤 Crear Usuario", 
+        "⚙️ Gestionar Permisos y Estados de Usuarios"
+    ])
+    
+    with tab_orgs:
+        st.subheader("Organizaciones Registradas")
+        conn          
