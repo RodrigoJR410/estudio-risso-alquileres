@@ -269,7 +269,6 @@ if st.session_state['usuario_logueado'] is None:
                             st.rerun()
                     else:
                         st.error("Credenciales incorrectas o usuario no encontrado.")
-            # (Se eliminó el cartel con las credenciales de prueba por seguridad)
 
         with tab_registro:
             st.write("Completá los datos para solicitar una nueva organización en la plataforma. El Administrador Maestro evaluará tu solicitud y te creará el acceso.")
@@ -338,6 +337,7 @@ with st.sidebar:
         st.session_state['usuario_logueado'] = None
         st.rerun()
 
+# Cargar datos filtrados de forma segura por el organizacion_id del usuario actual
 conn = obtener_conexion()
 df_alquileres = pd.read_sql("SELECT * FROM alquileres WHERE organizacion_id = ?", conn, params=(org_id_actual,))
 conn.close()
@@ -354,7 +354,7 @@ if opcion == "📊 Panel y Gráficos":
     """, unsafe_allow_html=True)
     
     if df_alquileres.empty:
-        st.info("Todavía no hay propiedades cargadas para tu organización.")
+        st.info("Todavía no hay propiedades cargadas para tu organización. Utiliza '➕ Cargar Propiedad' en el menú lateral.")
     else:
         total_propiedades = len(df_alquileres)
         recaudacion_potencial = df_alquileres['precio_alquiler'].sum()
@@ -603,7 +603,7 @@ PRIMERA: El locador da en locación el inmueble ubicado en {p_c_info['direccion'
 SEGUNDA: El plazo será de dos (2) años desde el {p_c_info['fecha_inicio']} hasta el {p_c_info['fecha_fin']}.
 TERCERA: El valor mensual se fija en la suma de PESOS (${p_c_info['precio_alquiler']:,.2f}), actualizable trimestralmente por índice ICL.
 
-In prueba de conformidad, se firman dos ejemplares."""
+En prueba de conformidad, se firman dos ejemplares."""
 
         texto_editado = st.text_area("Contrato Editable:", value=contrato_modelo_base, height=300)
 
@@ -652,152 +652,4 @@ elif opcion == "🗑️ Eliminar Propiedad":
                     conn.close()
                     st.success("¡Propiedad eliminada!")
                     st.rerun()
-                else:
-                    st.warning("Marcá la casilla de confirmación.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-elif opcion == "👑 Panel Maestro (Control Global)" and user_info['es_admin_general'] == 1 and user_info['email'] == "admin@gestor.com":
-    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-    st.header("👑 Panel de Control Maestro (Superadministrador)")
-    
-    tab_orgs, tab_solicitudes, tab_usuarios, tab_gestion_usuarios = st.tabs([
-        "🏢 Organismos", 
-        "🔔 Solicitudes", 
-        "👤 Crear Usuario", 
-        "⚙️ Gestionar Permisos y Estados de Usuarios"
-    ])
-    
-    with tab_orgs:
-        st.subheader("Organizaciones Registradas")
-        conn = obtener_conexion()
-        df_orgs = pd.read_sql("SELECT id, nombre_org AS Organización, CASE WHEN activa=1 THEN 'Activa 🟢' ELSE 'Suspendida 🔴' END AS Estado FROM organizaciones", conn)
-        conn.close()
-        st.dataframe(df_orgs, use_container_width=True)
-        
-        org_id_cambio = st.number_input("ID de la Organización a modificar:", min_value=1, step=1, key="org_cambio_id")
-        nuevo_estado = st.selectbox("Acción sobre la Organización:", ["Activar 🟢", "Suspender 🔴"], key="org_nuevo_est")
-        if st.button("Actualizar Estado de Organización"):
-            val_activa = 1 if "Activar" in nuevo_estado else 0
-            conn = obtener_conexion()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE organizaciones SET activa = ? WHERE id = ?", (val_activa, org_id_cambio))
-            conn.commit()
-            conn.close()
-            st.success("¡Estado actualizado!")
-            st.rerun()
-
-    with tab_solicitudes:
-        st.subheader("Solicitudes de Registro Pendientes")
-        conn = obtener_conexion()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT u.id, u.nombre_completo, u.email, o.nombre_org, o.id 
-            FROM usuarios u 
-            JOIN organizaciones o ON u.organizacion_id = o.id 
-            WHERE u.aprobado = 0
-        ''')
-        pendientes = cursor.fetchall()
-        conn.close()
-        
-        if not pendientes:
-            st.info("No hay solicitudes pendientes.")
-        else:
-            for p in pendientes:
-                col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
-                with col_s1:
-                    st.markdown(f"**{p[1]}** ({p[2]})")
-                with col_s2:
-                    st.markdown(f"Organización: <b>{p[3]}</b>", unsafe_allow_html=True)
-                with col_s3:
-                    if st.button(f"Aprobar Org ID {p[4]}", key=f"aprobar_org_{p[4]}"):
-                        conn = obtener_conexion()
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE usuarios SET aprobado = 1 WHERE organizacion_id = ?", (p[4],))
-                        conn.commit()
-                        conn.close()
-                        st.success(f"¡Organización aprobada con éxito!")
-                        st.rerun()
-
-    with tab_usuarios:
-        st.subheader("Crear Usuario / Empleado para una Organización")
-        conn = obtener_conexion()
-        orgs_list = pd.read_sql("SELECT id, nombre_org FROM organizaciones", conn)
-        conn.close()
-        
-        if orgs_list.empty:
-            st.warning("No hay organizaciones creadas.")
-        else:
-            with st.form("form_crear_usuario_maestro"):
-                u_email = st.text_input("Correo electrónico del empleado/usuario")
-                u_pass = st.text_input("Contraseña temporal", type="password")
-                u_nombre = st.text_input("Nombre y Apellido")
-                
-                dict_orgs = dict(zip(orgs_list['nombre_org'], orgs_list['id']))
-                org_elegida = st.selectbox("Seleccionar Organización", list(dict_orgs.keys()))
-                
-                u_permiso = st.selectbox("Permisos del Usuario:", ["Editor (Puede cargar, cobrar y editar) ✍️", "Solo Lectura (Solo puede ver datos) 👁️"])
-                
-                btn_crear_u = st.form_submit_button("Crear y Habilitar Usuario")
-                if btn_crear_u:
-                    if u_email and u_pass and u_nombre:
-                        org_id_sel = dict_orgs[org_elegida]
-                        escritura_val = 1 if "Editor" in u_permiso else 0
-                        try:
-                            conn = obtener_conexion()
-                            cursor = conn.cursor()
-                            pass_h = encriptar_password(u_pass)
-                            cursor.execute('''
-                                INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, permiso_escritura, aprobado)
-                                VALUES (?, ?, ?, ?, 0, ?, 1)
-                            ''', (u_email, pass_h, u_nombre, org_id_sel, escritura_val))
-                            conn.commit()
-                            conn.close()
-                            st.success(f"¡Usuario {u_nombre} creado con éxito!")
-                        except sqlite3.IntegrityError:
-                            st.error("El correo electrónico ya se encuentra registrado.")
-                    else:
-                        st.warning("Completá todos los campos.")
-
-    with tab_gestion_usuarios:
-        st.subheader("Gestionar Usuarios de las Organizaciones")
-        conn = obtener_conexion()
-        df_todos_usuarios = pd.read_sql("""
-            SELECT u.id, u.nombre_completo AS Nombre, u.email AS Correo, o.nombre_org AS Organización, 
-                   CASE WHEN u.permiso_escritura=1 THEN 'Editor ✍️' ELSE 'Solo Lectura 👁️' END AS Permisos,
-                   CASE WHEN u.aprobado=1 THEN 'Activo 🟢' ELSE 'Suspendido 🔴' END AS Estado
-            FROM usuarios u
-            JOIN organizaciones o ON u.organizacion_id = o.id
-            WHERE u.es_admin_general = 0
-        """, conn)
-        conn.close()
-        
-        if df_todos_usuarios.empty:
-            st.info("No hay usuarios registrados aparte del administrador maestro.")
-        else:
-            st.dataframe(df_todos_usuarios, use_container_width=True)
-            
-            st.markdown("---")
-            with st.form("form_editar_usuario"):
-                st.subheader("Modificar Permisos o Estado de un Usuario")
-                id_usu_mod = st.number_input("ID del Usuario a modificar:", min_value=1, step=1)
-                nuevo_permiso_usu = st.selectbox("Cambiar Permiso:", ["Editor ✍️", "Solo Lectura 👁️"])
-                nuevo_estado_usu = st.selectbox("Cambiar Estado:", ["Activo (Aprobado) 🟢", "Suspendido 🔴"])
-                
-                btn_guardar_cambios_usu = st.form_submit_button("Actualizar Usuario")
-                if btn_guardar_cambios_usu:
-                    escritura_v = 1 if "Editor" in nuevo_permiso_usu else 0
-                    aprobado_v = 1 if "Activo" in nuevo_estado_usu else 0
-                    
-                    conn = obtener_conexion()
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        UPDATE usuarios 
-                        SET permiso_escritura = ?, aprobado = ? 
-                        WHERE id = ? AND es_admin_general = 0
-                    """, (escritura_v, aprobado_v, id_usu_mod))
-                    conn.commit()
-                    conn.close()
-                    st.success("¡Usuario actualizado correctamente!")
-                    st.rerun()
-
-    st.markdown("</div>", unsafe_allow_html=True)
+                else
