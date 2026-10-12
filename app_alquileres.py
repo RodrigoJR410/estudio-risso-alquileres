@@ -269,7 +269,7 @@ if st.session_state['usuario_logueado'] is None:
                             st.rerun()
                     else:
                         st.error("Credenciales incorrectas o usuario no encontrado.")
-            st.info("💡 **Admin Maestro:** `admin@gestor.com` | Clave: `admin123`")
+            # (Se eliminó el cartel con las credenciales de prueba por seguridad)
 
         with tab_registro:
             st.write("Completá los datos para solicitar una nueva organización en la plataforma. El Administrador Maestro evaluará tu solicitud y te creará el acceso.")
@@ -603,7 +603,7 @@ PRIMERA: El locador da en locación el inmueble ubicado en {p_c_info['direccion'
 SEGUNDA: El plazo será de dos (2) años desde el {p_c_info['fecha_inicio']} hasta el {p_c_info['fecha_fin']}.
 TERCERA: El valor mensual se fija en la suma de PESOS (${p_c_info['precio_alquiler']:,.2f}), actualizable trimestralmente por índice ICL.
 
-En prueba de conformidad, se firman dos ejemplares."""
+In prueba de conformidad, se firman dos ejemplares."""
 
         texto_editado = st.text_area("Contrato Editable:", value=contrato_modelo_base, height=300)
 
