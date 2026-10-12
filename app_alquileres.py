@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import io
 import hashlib
+import altair as alt
 from docx import Document
 
 # --- Configuración de la página ---
@@ -393,6 +394,38 @@ if opcion == "📊 Panel y Gráficos":
             """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- SECCIÓN DE GRÁFICOS VISUALES ---
+        st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+        st.subheader("📊 Análisis Gráfico de Ingresos")
+        
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.markdown("##### 📈 Recaudación por Inmueble (Columnas)")
+            df_grafico = df_alquileres.set_index('nombre_propiedad')['precio_alquiler']
+            st.bar_chart(df_grafico, color="#10b981")
+            
+        with col_g2:
+            st.markdown("##### 🥧 Distribución Porcentual (Gráfico de Anillo)")
+            # Crear gráfico de torta/anillo interactivo con Altair
+            source = df_alquileres[['nombre_propiedad', 'precio_alquiler']]
+            
+            pie_chart = alt.Chart(source).mark_arc(innerRadius=60, outerRadius=110).encode(
+                theta=alt.Theta(field="precio_alquiler", type="quantitative"),
+                color=alt.Color(field="nombre_propiedad", type="nominal", legend=alt.Legend(title="Propiedad")),
+                tooltip=['nombre_propiedad', alt.Tooltip('precio_alquiler:Q', format="$,.2f")]
+            ).properties(
+                height=260
+            ).configure_view(
+                stroke=None
+            ).configure(
+                background='#162235'
+            )
+            st.altair_chart(pie_chart, use_container_width=True)
+            
+        st.markdown("</div>", unsafe_allow_html=True)
+
         st.markdown("<div class='content-card'>", unsafe_allow_html=True)
         st.subheader("📋 Listado Rápido de Inmuebles")
         st.dataframe(df_alquileres[['nombre_propiedad', 'direccion', 'inquilino', 'precio_alquiler', 'fecha_fin']], use_container_width=True)
@@ -455,7 +488,6 @@ elif opcion == "📈 Actualizar Precios e Historial":
         if not tiene_escritura:
             st.info("👁️ Estás en modo visualización. Solo los editores pueden registrar modificaciones de precios.")
         else:
-            # Inputs fuera de formulario para garantizar lectura y ejecución inmediata con botón directo
             nuevo_precio = st.number_input("Nuevo Monto ($)", min_value=0.0, value=float(prop_info['precio_alquiler']), step=1000.0)
             fecha_act = st.date_input("Fecha de Actualización", value=hoy)
             motivo = st.text_input("Motivo / Índice:", value="Actualización ICL / Cuatrimestral")
@@ -464,13 +496,11 @@ elif opcion == "📈 Actualizar Precios e Historial":
                 conn = obtener_conexion()
                 cursor = conn.cursor()
                 
-                # 1. Insertar el registro en el historial de precios
                 cursor.execute('''
                     INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
                     VALUES (?, ?, ?, ?)
                 ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
                 
-                # 2. Actualizar de forma exacta el precio actual en la tabla principal
                 cursor.execute('''
                     UPDATE alquileres 
                     SET precio_alquiler = ? 
@@ -616,7 +646,7 @@ En prueba de conformidad, se firman dos ejemplares."""
 
         texto_editado = st.text_area("Contrato Editable:", value=contrato_modelo_base, height=300)
 
-        if st.button("📥 Descargar Contrato in Word (.docx)"):
+        if st.button("📥 Descargar Contrato en Word (.docx)"):
             doc = Document()
             doc.add_heading(f"Contrato - {p_c_info['nombre_propiedad']}", level=1)
             for parrafo in texto_editado.split("\n\n"):
@@ -809,4 +839,4 @@ elif opcion == "👑 Panel Maestro (Control Global)" and user_info['es_admin_gen
                     st.success("¡Usuario actualizado correctamente!")
                     st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True)                 
+    st.markdown("</div>", unsafe_allow_html=True)
