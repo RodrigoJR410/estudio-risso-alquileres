@@ -337,7 +337,7 @@ with st.sidebar:
         st.session_state['usuario_logueado'] = None
         st.rerun()
 
-# --- CARGA FRESCA DE DATOS (Siempre lee directo de la base para evitar desincronización) ---
+# --- CARGA FRESCA DE DATOS ---
 conn = obtener_conexion()
 df_alquileres = pd.read_sql("SELECT * FROM alquileres WHERE organizacion_id = ?", conn, params=(org_id_actual,))
 conn.close()
@@ -447,7 +447,7 @@ elif opcion == "📈 Actualizar Precios e Historial":
     else:
         propiedad_seleccionada = st.selectbox("Seleccioná la propiedad:", df_alquileres['nombre_propiedad'].tolist())
         prop_info = df_alquileres[df_alquileres['nombre_propiedad'] == propiedad_seleccionada].iloc[0]
-        alq_id = prop_info['id']
+        alq_id = int(prop_info['id'])
         
         st.markdown(f"**Dirección:** {prop_info['direccion']} &nbsp;|&nbsp; **Precio Vigente:** <span style='color:#10b981; font-weight:bold;'>${prop_info['precio_alquiler']:,.2f}</span>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
@@ -455,30 +455,33 @@ elif opcion == "📈 Actualizar Precios e Historial":
         if not tiene_escritura:
             st.info("👁️ Estás en modo visualización. Solo los editores pueden registrar modificaciones de precios.")
         else:
-            with st.form("form_precio"):
-                st.subheader("Registrar Nuevo Ajuste")
-                nuevo_precio = st.number_input("Nuevo Monto ($)", min_value=0.0, step=1000.0)
-                fecha_act = st.date_input("Fecha de Actualización", value=hoy)
-                motivo = st.text_input("Motivo / Índice:", value="Actualización ICL / Cuatrimestral")
+            # Inputs fuera de formulario para garantizar lectura y ejecución inmediata con botón directo
+            nuevo_precio = st.number_input("Nuevo Monto ($)", min_value=0.0, value=float(prop_info['precio_alquiler']), step=1000.0)
+            fecha_act = st.date_input("Fecha de Actualización", value=hoy)
+            motivo = st.text_input("Motivo / Índice:", value="Actualización ICL / Cuatrimestral")
+            
+            if st.button("💾 Guardar Actualización de Precio"):
+                conn = obtener_conexion()
+                cursor = conn.cursor()
                 
-                if st.form_submit_button("Guardar Actualización"):
-                    conn = obtener_conexion()
-                    cursor = conn.cursor()
-                    # 1. Guardar en el historial
-                    cursor.execute('''
-                        INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
-                        VALUES (?, ?, ?, ?)
-                    ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
-                    # 2. Actualizar el precio vigente en la tabla principal
-                    cursor.execute('''
-                        UPDATE alquileres 
-                        SET precio_alquiler = ? 
-                        WHERE id = ?
-                    ''', (nuevo_precio, alq_id))
-                    conn.commit()
-                    conn.close()
-                    st.success("¡Actualización guardada y precio vigente actualizado correctamente!")
-                    st.rerun()
+                # 1. Insertar el registro en el historial de precios
+                cursor.execute('''
+                    INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
+                    VALUES (?, ?, ?, ?)
+                ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
+                
+                # 2. Actualizar de forma exacta el precio actual en la tabla principal
+                cursor.execute('''
+                    UPDATE alquileres 
+                    SET precio_alquiler = ? 
+                    WHERE id = ?
+                ''', (nuevo_precio, alq_id))
+                
+                conn.commit()
+                conn.close()
+                
+                st.success(f"¡Precio actualizado a ${nuevo_precio:,.2f} con éxito para {propiedad_seleccionada}!")
+                st.rerun()
 
         st.divider()
         st.subheader("Historial Registrado")
@@ -613,7 +616,7 @@ En prueba de conformidad, se firman dos ejemplares."""
 
         texto_editado = st.text_area("Contrato Editable:", value=contrato_modelo_base, height=300)
 
-        if st.button("📥 Descargar Contrato en Word (.docx)"):
+        if st.button("📥 Descargar Contrato in Word (.docx)"):
             doc = Document()
             doc.add_heading(f"Contrato - {p_c_info['nombre_propiedad']}", level=1)
             for parrafo in texto_editado.split("\n\n"):
@@ -806,4 +809,4 @@ elif opcion == "👑 Panel Maestro (Control Global)" and user_info['es_admin_gen
                     st.success("¡Usuario actualizado correctamente!")
                     st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)                 
