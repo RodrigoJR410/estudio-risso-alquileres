@@ -18,7 +18,7 @@ st.set_page_config(
 def encriptar_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# --- Base de Datos y Estructura Multiusuario Avanzada ---
+# --- Base de Datos y Estructura Multiusuario ---
 def obtener_conexion():
     carpeta_actual = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
     ruta_db = os.path.join(carpeta_actual, 'mis_alquileres_pro.db')
@@ -32,7 +32,8 @@ def inicializar_bd():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS organizaciones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre_org TEXT NOT NULL UNIQUE
+            nombre_org TEXT NOT NULL UNIQUE,
+            activa INTEGER DEFAULT 1
         )
     ''')
     
@@ -45,24 +46,25 @@ def inicializar_bd():
             nombre_completo TEXT,
             organizacion_id INTEGER,
             es_admin_general INTEGER DEFAULT 0,
-            es_admin_org INTEGER DEFAULT 0,
             permiso_escritura INTEGER DEFAULT 1,
             aprobado INTEGER DEFAULT 0,
             FOREIGN KEY (organizacion_id) REFERENCES organizaciones (id)
         )
     ''')
     
-    # Asegurar compatibilidad agregando columnas si la base de datos ya existía previamente
+    # Asegurar compatibilidad de columnas si la tabla ya existía
     cursor.execute("PRAGMA table_info(usuarios)")
-    columnas_existentes = [col[1] for col in cursor.fetchall()]
-    
-    if "es_admin_org" not in columnas_existentes:
-        cursor.execute("ALTER TABLE usuarios ADD COLUMN es_admin_org INTEGER DEFAULT 0")
-    if "permiso_escritura" not in columnas_existentes:
+    cols_u = [col[1] for col in cursor.fetchall()]
+    if "permiso_escritura" not in cols_u:
         cursor.execute("ALTER TABLE usuarios ADD COLUMN permiso_escritura INTEGER DEFAULT 1")
-    if "aprobado" not in columnas_existentes:
-        cursor.execute("ALTER TABLE usuarios ADD COLUMN aprobado INTEGER DEFAULT 1") # True por defecto para cuentas viejas
-        
+    if "aprobado" not in cols_u:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN aprobado INTEGER DEFAULT 1")
+
+    cursor.execute("PRAGMA table_info(organizaciones)")
+    cols_o = [col[1] for col in cursor.fetchall()]
+    if "activa" not in cols_o:
+        cursor.execute("ALTER TABLE organizaciones ADD COLUMN activa INTEGER DEFAULT 1")
+
     # Tabla de Alquileres
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alquileres (
@@ -106,18 +108,18 @@ def inicializar_bd():
         )
     ''')
     
-    # Crear cuenta Superadministrador por defecto si no existe
+    # Crear cuenta Superadministrador Maestro si no existe
     cursor.execute("SELECT COUNT(*) FROM usuarios WHERE es_admin_general = 1")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT OR IGNORE INTO organizaciones (nombre_org) VALUES ('Plataforma Central')")
+        cursor.execute("INSERT OR IGNORE INTO organizaciones (nombre_org, activa) VALUES ('Plataforma Central', 1)")
         cursor.execute("SELECT id FROM organizaciones WHERE nombre_org = 'Plataforma Central'")
         org_id = cursor.fetchone()[0]
         
         pass_maestro = encriptar_password("admin123")
         cursor.execute('''
-            INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado)
-            VALUES (?, ?, ?, ?, 1, 1, 1, 1)
-        ''', ("admin@gestor.com", pass_maestro, "Super Administrador", org_id))
+            INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, permiso_escritura, aprobado)
+            VALUES (?, ?, ?, ?, 1, 1, 1)
+        ''', ("admin@gestor.com", pass_maestro, "Administrador Maestro", org_id))
         conn.commit()
 
     conn.close()
@@ -210,7 +212,7 @@ st.markdown("""
 if 'usuario_logueado' not in st.session_state:
     st.session_state['usuario_logueado'] = None
 
-# --- Pantalla de Autenticación (Login / Registro) ---
+# --- Pantalla de Autenticación (Login / Solicitud) ---
 if st.session_state['usuario_logueado'] is None:
     st.markdown("<br>", unsafe_allow_html=True)
     col_l1, col_l2, col_l3 = st.columns([1, 1.8, 1])
@@ -224,7 +226,7 @@ if st.session_state['usuario_logueado'] is None:
         """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
         
-        tab_login, tab_registro = st.tabs(["🔑 Iniciar Sesión", "📝 Solicitar Cuenta / Registro"])
+        tab_login, tab_registro = st.tabs(["🔑 Iniciar Sesión", "📝 Solicitar Cuenta / Organización"])
         
         with tab_login:
             with st.form("form_login"):
@@ -237,15 +239,19 @@ if st.session_state['usuario_logueado'] is None:
                     cursor = conn.cursor()
                     pass_hash = encriptar_password(pass_ingresado)
                     cursor.execute("""
-                        SELECT id, email, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado 
-                        FROM usuarios WHERE email = ? AND password = ?
+                        SELECT u.id, u.email, u.nombre_completo, u.organizacion_id, u.es_admin_general, u.permiso_escritura, u.aprobado, o.activa 
+                        FROM usuarios u
+                        JOIN organizaciones o ON u.organizacion_id = o.id
+                        WHERE u.email = ? AND u.password = ?
                     """, (email_ingresado, pass_hash))
                     user = cursor.fetchone()
                     conn.close()
                     
                     if user:
-                        if user[7] == 0: # aprobado == 0
-                            st.warning("⚠️ Tu cuenta se encuentra registrada pero aún está pendiente de aprobación por el administrador de la plataforma.")
+                        if user[6] == 0: # aprobado == 0
+                            st.warning("⚠️ Tu cuenta se encuentra pendiente de aprobación por el Administrador Maestro.")
+                        elif user[7] == 0: # organizacion activa == 0
+                            st.error("🚫 La organización asociada a esta cuenta se encuentra suspendida. Contactá al soporte.")
                         else:
                             st.session_state['usuario_logueado'] = {
                                 "id": user[0],
@@ -253,44 +259,43 @@ if st.session_state['usuario_logueado'] is None:
                                 "nombre": user[2],
                                 "org_id": user[3],
                                 "es_admin_general": user[4],
-                                "es_admin_org": user[5],
-                                "permiso_escritura": user[6]
+                                "permiso_escritura": user[5]
                             }
                             st.success("¡Ingreso exitoso!")
                             st.rerun()
                     else:
                         st.error("Credenciales incorrectas o usuario no encontrado.")
-            st.info("💡 **Demo Administrador:** `admin@gestor.com` | Clave: `admin123`")
+            st.info("💡 **Admin Maestro:** `admin@gestor.com` | Clave: `admin123`")
 
         with tab_registro:
-            st.write("Registrate para solicitar acceso. Al crear tu cuenta, se generará una nueva organización privada para vos que deberá ser aprobada.")
+            st.write("Completá los datos para solicitar una nueva organización en la plataforma. El Administrador Maestro evaluará tu solicitud y te creará las credenciales.")
             with st.form("form_registro"):
                 reg_nombre = st.text_input("Nombre y Apellido")
                 reg_email = st.text_input("Correo Electrónico de Contacto")
-                reg_org = st.text_input("Nombre de tu Estudio / Inmobiliaria / Organización")
-                reg_pass = st.text_input("Contraseña", type="password")
-                btn_reg = st.form_submit_button("Enviar Solicitud de Registro")
+                reg_org = st.text_input("Nombre de tu Estudio / Inmobiliaria")
+                reg_pass = st.text_input("Contraseña deseada", type="password")
+                btn_reg = st.form_submit_button("Enviar Solicitud")
                 
                 if btn_reg:
                     if reg_nombre and reg_email and reg_org and reg_pass:
                         try:
                             conn = obtener_conexion()
                             cursor = conn.cursor()
-                            cursor.execute("INSERT INTO organizaciones (nombre_org) VALUES (?)", (reg_org,))
+                            cursor.execute("INSERT INTO organizaciones (nombre_org, activa) VALUES (?, 1)", (reg_org,))
                             org_id = cursor.lastrowid
                             
                             pass_h = encriptar_password(reg_pass)
                             cursor.execute('''
-                                INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado)
-                                VALUES (?, ?, ?, ?, 0, 1, 1, 0)
+                                INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, permiso_escritura, aprobado)
+                                VALUES (?, ?, ?, ?, 0, 1, 0)
                             ''', (reg_email, pass_h, reg_nombre, org_id))
                             conn.commit()
                             conn.close()
-                            st.success("¡Solicitud enviada con éxito! Un administrador general revisará y aprobará tu cuenta en breve.")
+                            st.success("¡Solicitud enviada correctamente! El Administrador Maestro la revisará y habilitará pronto.")
                         except sqlite3.IntegrityError:
-                            st.error("El correo electrónico o el nombre de organización ya se encuentran registrados.")
+                            st.error("El correo o el nombre de organización ya están registrados.")
                     else:
-                        st.warning("Por favor completá todos los campos.")
+                        st.warning("Completá todos los campos obligatorios.")
     st.stop()
 
 # --- Usuario Logueado ---
@@ -304,7 +309,7 @@ with st.sidebar:
             <div style='font-size: 28px;'>🏢</div>
             <h3 style='color: #ffffff !important; margin: 5px 0 0 0; font-size: 15px;'>Gestión Inmobiliaria</h3>
             <p style='font-size: 11px; color: #10b981; margin: 4px 0 0 0;'><b>{user_info['nombre']}</b></p>
-            <p style='font-size: 10px; color: #94a3b8; margin: 2px 0 0 0;'>{'✍️ Editor' if tiene_escritura else '👁️ Solo Lectura'}</p>
+            <p style='font-size: 10px; color: #94a3b8; margin: 2px 0 0 0;'>{'👑 Admin Maestro' if user_info['es_admin_general']==1 else ('✍️ Editor' if tiene_escritura else '👁️ Solo Lectura')}</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -318,11 +323,9 @@ with st.sidebar:
         "🗑️ Eliminar Propiedad"
     ]
     
-    if user_info['es_admin_general'] == 1 or user_info['es_admin_org'] == 1:
-        menu_opciones.append("👥 Gestión de Miembros del Equipo")
-        
+    # Si es el Administrador Maestro, ve el Panel de Control Global absoluto
     if user_info['es_admin_general'] == 1:
-        menu_opciones.append("🛡️ Aprobación de Cuentas (Admin)")
+        menu_opciones.append("👑 Panel Maestro (Control Global)")
 
     opcion = st.radio("Navegación del Sistema:", menu_opciones)
     
@@ -649,76 +652,100 @@ elif opcion == "🗑️ Eliminar Propiedad":
                     st.warning("Marcá la casilla de confirmación.")
         st.markdown("</div>", unsafe_allow_html=True)
 
-elif opcion == "👥 Gestión de Miembros del Equipo" and (user_info['es_admin_general'] == 1 or user_info['es_admin_org'] == 1):
+elif opcion == "👑 Panel Maestro (Control Global)" and user_info['es_admin_general'] == 1:
     st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-    st.header("👥 Gestión de Miembros de tu Organización")
-    st.write("Agregá colaboradores a tu organización y asignales permisos de edición o solo lectura.")
+    st.header("👑 Panel de Control Maestro (Superadministrador)")
     
-    with st.form("form_nuevo_colab"):
-        c_email = st.text_input("Correo electrónico del colaborador")
-        c_pass = st.text_input("Contraseña temporal", type="password")
-        c_nombre = st.text_input("Nombre y Apellido")
-        c_escritura = st.checkbox("¿Permitir permisos de Escritura / Edición?", value=True)
+    tab_orgs, tab_solicitudes, tab_usuarios = st.tabs(["🏢 Gestionar Organizaciones", "🔔 Solicitudes Pendientes", "👤 Crear Usuarios para una Org"])
+    
+    with tab_orgs:
+        st.subheader("Organizaciones Registradas en la Plataforma")
+        conn = obtener_conexion()
+        df_orgs = pd.read_sql("SELECT id, nombre_org AS Organización, CASE WHEN activa=1 THEN 'Activa 🟢' ELSE 'Suspendida 🔴' END AS Estado FROM organizaciones", conn)
+        conn.close()
+        st.dataframe(df_orgs, use_container_width=True)
         
-        btn_crear_c = st.form_submit_button("Crear Colaborador")
-        if btn_crear_c:
-            if c_email and c_pass and c_nombre:
-                try:
-                    conn = obtener_conexion()
-                    cursor = conn.cursor()
-                    pass_enc = encriptar_password(c_pass)
-                    cursor.execute('''
-                        INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado)
-                        VALUES (?, ?, ?, ?, 0, 0, ?, 1)
-                    ''', (c_email, pass_enc, c_nombre, org_id_actual, 1 if c_escritura else 0))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"¡Colaborador {c_nombre} creado con éxito y habilitado!")
-                except sqlite3.IntegrityError:
-                    st.error("El correo electrónico ya está registrado.")
-            else:
-                st.warning("Completá todos los campos.")
+        org_id_cambio = st.number_input("ID de la Organización a modificar:", min_value=1, step=1)
+        nuevo_estado = st.selectbox("Acción sobre la Organización:", ["Activar 🟢", "Suspender 🔴"])
+        if st.button("Actualizar Estado de Organización"):
+            val_activa = 1 if "Activar" in nuevo_estado else 0
+            conn = obtener_conexion()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE organizaciones SET activa = ? WHERE id = ?", (val_activa, org_id_cambio))
+            conn.commit()
+            conn.close()
+            st.success("¡Estado de la organización actualizado con éxito!")
+            st.rerun()
 
-    st.divider()
-    st.subheader("Miembros actuales de tu Organización:")
-    conn = obtener_conexion()
-    df_miembros = pd.read_sql("SELECT nombre_completo AS Nombre, email AS Correo, CASE WHEN permiso_escritura=1 THEN 'Editor ✍️' ELSE 'Solo Lectura 👁️' END AS Permisos FROM usuarios WHERE organizacion_id = ?", conn, params=(org_id_actual,))
-    conn.close()
-    st.dataframe(df_miembros, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    with tab_solicitudes:
+        st.subheader("Solicitudes de Registro Pendientes")
+        conn = obtener_conexion()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT u.id, u.nombre_completo, u.email, o.nombre_org, o.id 
+            FROM usuarios u 
+            JOIN organizaciones o ON u.organizacion_id = o.id 
+            WHERE u.aprobado = 0
+        ''')
+        pendientes = cursor.fetchall()
+        conn.close()
+        
+        if not pendientes:
+            st.info("No hay solicitudes pendientes.")
+        else:
+            for p in pendientes:
+                col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
+                with col_s1:
+                    st.markdown(f"**{p[1]}** ({p[2]})")
+                with col_s2:
+                    st.markdown(f"Organización: <b>{p[3]}</b>", unsafe_allow_html=True)
+                with col_s3:
+                    if st.button(f"Aprobar Org ID {p[4]}", key=f"aprobar_org_{p[4]}"):
+                        conn = obtener_conexion()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE usuarios SET aprobado = 1 WHERE organizacion_id = ?", (p[4],))
+                        conn.commit()
+                        conn.close()
+                        st.success(f"¡Organización aprobada con éxito!")
+                        st.rerun()
 
-elif opcion == "🛡️ Aprobación de Cuentas (Admin)" and user_info['es_admin_general'] == 1:
-    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-    st.header("🛡️ Panel Superadministrador - Aprobación de Nuevas Cuentas")
-    
-    conn = obtener_conexion()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT u.id, u.nombre_completo, u.email, o.nombre_org 
-        FROM usuarios u 
-        JOIN organizaciones o ON u.organizacion_id = o.id 
-        WHERE u.aprobado = 0
-    ''')
-    pendientes = cursor.fetchall()
-    conn.close()
-    
-    if not pendientes:
-        st.info("No hay solicitudes de cuentas pendientes de aprobación en este momento.")
-    else:
-        st.write("Las siguientes organizaciones solicitaron acceso a la plataforma:")
-        for p in pendientes:
-            col_ap1, col_ap2, col_ap3 = st.columns([2, 2, 1])
-            with col_ap1:
-                st.markdown(f"**{p[1]}** ({p[2]})")
-            with col_ap2:
-                st.markdown(f"Organización: <b>{p[3]}</b>", unsafe_allow_html=True)
-            with col_ap3:
-                if st.button(f"Aprobar ID {p[0]}", key=f"aprobar_{p[0]}"):
-                    conn = obtener_conexion()
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE usuarios SET aprobado = 1 WHERE id = ?", (p[0],))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"¡Cuenta aprobada con éxito!")
-                    st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+    with tab_usuarios:
+        st.subheader("Crear Usuario / Empleado para una Organización")
+        conn = obtener_conexion()
+        orgs_list = pd.read_sql("SELECT id, nombre_org FROM organizaciones", conn)
+        conn.close()
+        
+        if orgs_list.empty:
+            st.warning("No hay organizaciones creadas.")
+        else:
+            with st.form("form_crear_usuario_maestro"):
+                u_email = st.text_input("Correo electrónico del empleado/usuario")
+                u_pass = st.text_input("Contraseña temporal", type="password")
+                u_nombre = st.text_input("Nombre y Apellido")
+                
+                dict_orgs = dict(zip(orgs_list['nombre_org'], orgs_list['id']))
+                org_elegida = st.selectbox("Seleccionar Organización", list(dict_orgs.keys()))
+                
+                u_permiso = st.selectbox("Permisos del Usuario:", ["Editor (Puede cargar, cobrar y editar) ✍️", "Solo Lectura (Solo puede ver datos) 👁️"])
+                
+                btn_crear_u = st.form_submit_button("Crear y Habilitar Usuario")
+                if btn_crear_u:
+                    if u_email and u_pass and u_nombre:
+                        org_id_sel = dict_orgs[org_elegida]
+                        escritura_val = 1 if "Editor" in u_permiso else 0
+                        try:
+                            conn = obtener_conexion()
+                            cursor = conn.cursor()
+                            pass_h = encriptar_password(u_pass)
+                            cursor.execute('''
+                                INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, permiso_escritura, aprobado)
+                                VALUES (?, ?, ?, ?, 0, ?, 1)
+                            ''', (u_email, pass_h, u_nombre, org_id_sel, escritura_val))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"¡Usuario {u_nombre} creado con éxito para la organización '{org_elegida}'!")
+                        except sqlite3.IntegrityError:
+                            st.error("El correo electrónico ya se encuentra registrado.")
+                    else:
+                        st.warning("Completá todos los campos.")
+    st.markdown("</div>", unsafe_allow_html=True)       
