@@ -337,7 +337,7 @@ with st.sidebar:
         st.session_state['usuario_logueado'] = None
         st.rerun()
 
-# Cargar datos filtrados de forma segura por el organizacion_id del usuario actual
+# --- CARGA FRESCA DE DATOS (Siempre lee directo de la base para evitar desincronización) ---
 conn = obtener_conexion()
 df_alquileres = pd.read_sql("SELECT * FROM alquileres WHERE organizacion_id = ?", conn, params=(org_id_actual,))
 conn.close()
@@ -464,12 +464,12 @@ elif opcion == "📈 Actualizar Precios e Historial":
                 if st.form_submit_button("Guardar Actualización"):
                     conn = obtener_conexion()
                     cursor = conn.cursor()
-                    # 1. Guardar en el historial de precios
+                    # 1. Guardar en el historial
                     cursor.execute('''
                         INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
                         VALUES (?, ?, ?, ?)
                     ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
-                    # 2. Actualizar el precio actual en la tabla principal de alquileres
+                    # 2. Actualizar el precio vigente en la tabla principal
                     cursor.execute('''
                         UPDATE alquileres 
                         SET precio_alquiler = ? 
