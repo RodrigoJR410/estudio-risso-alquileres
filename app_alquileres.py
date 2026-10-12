@@ -14,11 +14,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Función para encriptar contraseñas por seguridad ---
+# --- Función para encriptar contraseñas ---
 def encriptar_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# --- Base de Datos y Estructura Multiusuario ---
+# --- Base de Datos y Estructura Multiusuario Avanzada ---
 def obtener_conexion():
     carpeta_actual = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
     ruta_db = os.path.join(carpeta_actual, 'mis_alquileres_pro.db')
@@ -36,7 +36,7 @@ def inicializar_bd():
         )
     ''')
     
-    # Tabla de Usuarios
+    # Tabla de Usuarios (con estado de aprobación y permisos de rol)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,11 +45,14 @@ def inicializar_bd():
             nombre_completo TEXT,
             organizacion_id INTEGER,
             es_admin_general INTEGER DEFAULT 0,
+            es_admin_org INTEGER DEFAULT 0,
+            permiso_escritura INTEGER DEFAULT 1,
+            aprobado INTEGER DEFAULT 0,
             FOREIGN KEY (organizacion_id) REFERENCES organizaciones (id)
         )
     ''')
     
-    # Tabla de Alquileres (Vinculada a Organización)
+    # Tabla de Alquileres
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alquileres (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,18 +95,18 @@ def inicializar_bd():
         )
     ''')
     
-    # Crear un usuario Administrador Maestro por defecto si no existe ninguno
-    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    # Crear cuenta Superadministrador por defecto (aprobada automáticamente)
+    cursor.execute("SELECT COUNT(*) FROM usuarios WHERE es_admin_general = 1")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT OR IGNORE INTO organizaciones (nombre_org) VALUES ('Administración Central')")
-        cursor.execute("SELECT id FROM organizaciones WHERE nombre_org = 'Administración Central'")
+        cursor.execute("INSERT OR IGNORE INTO organizaciones (nombre_org) VALUES ('Plataforma Central')")
+        cursor.execute("SELECT id FROM organizaciones WHERE nombre_org = 'Plataforma Central'")
         org_id = cursor.fetchone()[0]
         
         pass_maestro = encriptar_password("admin123")
         cursor.execute('''
-            INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general)
-            VALUES (?, ?, ?, ?, ?)
-        ''', ("admin@gestor.com", pass_maestro, "Administrador Maestro", org_id, 1))
+            INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado)
+            VALUES (?, ?, ?, ?, 1, 1, 1, 1)
+        ''', ("admin@gestor.com", pass_maestro, "Super Administrador", org_id))
         conn.commit()
 
     conn.close()
@@ -196,59 +199,103 @@ st.markdown("""
 if 'usuario_logueado' not in st.session_state:
     st.session_state['usuario_logueado'] = None
 
-# --- Pantalla de Login si no hay sesión activa ---
+# --- Pantalla de Autenticación (Login / Registro) ---
 if st.session_state['usuario_logueado'] is None:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col_l1, col_l2, col_l3 = st.columns([1, 1.5, 1])
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_l1, col_l2, col_l3 = st.columns([1, 1.8, 1])
     with col_l2:
         st.markdown("""
-            <div style='text-align: center; padding: 30px; background: #162235; border-radius: 15px; border: 1px solid #1e293b; box-shadow: 0 8px 25px rgba(0,0,0,0.4);'>
-                <div style='font-size: 45px; margin-bottom: 10px;'>🏢</div>
+            <div style='text-align: center; padding: 25px; background: #162235; border-radius: 15px; border: 1px solid #1e293b; box-shadow: 0 8px 25px rgba(0,0,0,0.4);'>
+                <div style='font-size: 40px; margin-bottom: 5px;'>🏢</div>
                 <h2 style='color: #ffffff !important; margin: 0;'>Gestor Inmobiliario Pro</h2>
-                <p style='color: #94a3b8; font-size: 13px; margin-top: 5px;'>Iniciá sesión para acceder a tu organización</p>
+                <p style='color: #94a3b8; font-size: 13px; margin-top: 5px;'>Plataforma multiusuario de gestión y contratos</p>
             </div>
         """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
         
-        with st.form("form_login"):
-            email_ingresado = st.text_input("Correo Electrónico")
-            pass_ingresado = st.text_input("Contraseña", type="password")
-            btn_login = st.form_submit_button("Ingresar al Sistema")
-            
-            if btn_login:
-                conn = obtener_conexion()
-                cursor = conn.cursor()
-                pass_hash = encriptar_password(pass_ingresado)
-                cursor.execute("SELECT id, email, nombre_completo, organizacion_id, es_admin_general FROM usuarios WHERE email = ? AND password = ?", (email_ingresado, pass_hash))
-                user = cursor.fetchone()
-                conn.close()
-                
-                if user:
-                    st.session_state['usuario_logueado'] = {
-                        "id": user[0],
-                        "email": user[1],
-                        "nombre": user[2],
-                        "org_id": user[3],
-                        "es_admin": user[4]
-                    }
-                    st.success("¡Ingreso exitoso! Redirigindo...")
-                    st.rerun()
-                else:
-                    st.error("Credenciales incorrectas. Verificá tu mail y contraseña.")
+        tab_login, tab_registro = st.tabs(["🔑 Iniciar Sesión", "📝 Solicitar Cuenta / Registro"])
         
-        st.info("💡 **Acceso inicial por defecto:** Usuario: `admin@gestor.com` | Contraseña: `admin123`")
+        with tab_login:
+            with st.form("form_login"):
+                email_ingresado = st.text_input("Correo Electrónico")
+                pass_ingresado = st.text_input("Contraseña", type="password")
+                btn_login = st.form_submit_button("Ingresar al Sistema")
+                
+                if btn_login:
+                    conn = obtener_conexion()
+                    cursor = conn.cursor()
+                    pass_hash = encriptar_password(pass_ingresado)
+                    cursor.execute("""
+                        SELECT id, email, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado 
+                        FROM usuarios WHERE email = ? AND password = ?
+                    """, (email_ingresado, pass_hash))
+                    user = cursor.fetchone()
+                    conn.close()
+                    
+                    if user:
+                        if user[7] == 0: # aprobado == 0
+                            st.warning("⚠️ Tu cuenta se encuentra registrada pero aún está pendiente de aprobación por el administrador de la plataforma.")
+                        else:
+                            st.session_state['usuario_logueado'] = {
+                                "id": user[0],
+                                "email": user[1],
+                                "nombre": user[2],
+                                "org_id": user[3],
+                                "es_admin_general": user[4],
+                                "es_admin_org": user[5],
+                                "permiso_escritura": user[6]
+                            }
+                            st.success("¡Ingreso exitoso!")
+                            st.rerun()
+                    else:
+                        st.error("Credenciales incorrectas o usuario no encontrado.")
+            st.info("💡 **Demo Administrador:** `admin@gestor.com` | Clave: `admin123`")
+
+        with tab_registro:
+            st.write("Registrate para solicitar acceso. Al crear tu cuenta, se generará una nueva organización privada para vos que deberá ser aprobada.")
+            with st.form("form_registro"):
+                reg_nombre = st.text_input("Nombre y Apellido")
+                reg_email = st.text_input("Correo Electrónico de Contacto")
+                reg_org = st.text_input("Nombre de tu Estudio / Inmobiliaria / Organización")
+                reg_pass = st.text_input("Contraseña", type="password")
+                btn_reg = st.form_submit_button("Enviar Solicitud de Registro")
+                
+                if btn_reg:
+                    if reg_nombre and reg_email and reg_org and reg_pass:
+                        try:
+                            conn = obtener_conexion()
+                            cursor = conn.cursor()
+                            # 1. Crear organización
+                            cursor.execute("INSERT INTO organizaciones (nombre_org) VALUES (?)", (reg_org,))
+                            org_id = cursor.lastrowid
+                            
+                            # 2. Crear usuario como admin de su org pero pendiente de aprobación general (aprobado = 0)
+                            pass_h = encriptar_password(reg_pass)
+                            cursor.execute('''
+                                INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado)
+                                VALUES (?, ?, ?, ?, 0, 1, 1, 0)
+                            ''', (reg_email, pass_h, reg_nombre, org_id))
+                            conn.commit()
+                            conn.close()
+                            st.success("¡Solicitud enviada con éxito! Un administrador general revisará y aprobará tu cuenta en breve.")
+                        except sqlite3.IntegrityError:
+                            st.error("El correo electrónico o el nombre de organización ya se encuentran registrados.")
+                    else:
+                        st.warning("Por favor completá todos los campos.")
     st.stop()
 
-# --- Usuario Ya Logueado: Interfaz Principal ---
+# --- Usuario Logueado ---
 user_info = st.session_state['usuario_logueado']
 org_id_actual = user_info['org_id']
+tiene_escritura = user_info['permiso_escritura'] == 1
 
 with st.sidebar:
     st.markdown(f"""
         <div style='text-align: center; padding: 15px; background: linear-gradient(135deg, #162235 0%, #0e1621 100%); border-radius: 10px; border: 1px solid #1e293b; margin-bottom: 15px;'>
-            <div style='font-size: 30px;'>🏢</div>
-            <h3 style='color: #ffffff !important; margin: 5px 0 0 0; font-size: 16px;'>Gestor Inmobiliario</h3>
-            <p style='font-size: 11px; color: #10b981; margin: 5px 0 0 0;'><b>{user_info['nombre']}</b></p>
+            <div style='font-size: 28px;'>🏢</div>
+            <h3 style='color: #ffffff !important; margin: 5px 0 0 0; font-size: 15px;'>Gestión Inmobiliaria</h3>
+            <p style='font-size: 11px; color: #10b981; margin: 4px 0 0 0;'><b>{user_info['nombre']}</b></p>
+            <p style='font-size: 10px; color: #94a3b8; margin: 2px 0 0 0;'>{'✍️ Editor' if tiene_escritura else '👁️ Solo Lectura'}</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -262,9 +309,13 @@ with st.sidebar:
         "🗑️ Eliminar Propiedad"
     ]
     
-    # Si es administrador general, agregamos la solapa de gestión de usuarios/organizaciones
-    if user_info['es_admin'] == 1:
-        menu_opciones.append("👥 Gestión de Usuarios y Orgs")
+    # Si es administrador de organización o general, puede gestionar sus colaboradores
+    if user_info['es_admin_general'] == 1 or user_info['es_admin_org'] == 1:
+        menu_opciones.append("👥 Gestión de Miembros del Equipo")
+        
+    # Si es el Administrador General de la plataforma, ve el panel de aprobación global
+    if user_info['es_admin_general'] == 1:
+        menu_opciones.append("🛡️ Aprobación de Cuentas (Admin)")
 
     opcion = st.radio("Navegación del Sistema:", menu_opciones)
     
@@ -273,7 +324,7 @@ with st.sidebar:
         st.session_state['usuario_logueado'] = None
         st.rerun()
 
-# Cargar datos filtrados exclusivamente por la organización del usuario actual
+# Cargar datos filtrados por la organización
 conn = obtener_conexion()
 df_alquileres = pd.read_sql("SELECT * FROM alquileres WHERE organizacion_id = ?", conn, params=(org_id_actual,))
 conn.close()
@@ -290,7 +341,7 @@ if opcion == "📊 Panel y Gráficos":
     """, unsafe_allow_html=True)
     
     if df_alquileres.empty:
-        st.info("Todavía no hay propiedades cargadas para tu organización. Utiliza '➕ Cargar Propiedad' para comenzar.")
+        st.info("Todavía no hay propiedades cargadas para tu organización.")
     else:
         total_propiedades = len(df_alquileres)
         recaudacion_potencial = df_alquileres['precio_alquiler'].sum()
@@ -329,55 +380,50 @@ if opcion == "📊 Panel y Gráficos":
             """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        
         st.markdown("<div class='content-card'>", unsafe_allow_html=True)
         st.subheader("📋 Listado Rápido de Inmuebles")
         st.dataframe(df_alquileres[['nombre_propiedad', 'direccion', 'inquilino', 'precio_alquiler', 'fecha_fin']], use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-        st.subheader("📈 Distribución de Ingresos por Inmueble")
-        if not df_alquileres.empty:
-            chart_data = df_alquileres.set_index('nombre_propiedad')[['precio_alquiler']]
-            st.bar_chart(chart_data)
-        st.markdown("</div>", unsafe_allow_html=True)
-
 elif opcion == "➕ Cargar Propiedad":
-    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-    st.header("➕ Cargar Nueva Propiedad y Contrato")
-    
-    with st.form("form_carga"):
-        col1, col2 = st.columns(2)
-        with col1:
-            nombre = st.text_input("Nombre / Identificación de la Propiedad *")
-            direccion = st.text_input("Dirección *")
-            inquilino = st.text_input("Nombre del Inquilino")
-            precio = st.number_input("Precio Inicial del Alquiler ($)", min_value=0.0, step=1000.0)
+    if not tiene_escritura:
+        st.error("🔒 Tu cuenta tiene perfil de **Solo Lectura**. No tenés permisos para cargar nuevas propiedades.")
+    else:
+        st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+        st.header("➕ Cargar Nueva Propiedad y Contrato")
         
-        with col2:
-            f_inicio = st.date_input("Fecha Inicio Contrato", value=hoy)
-            f_fin = st.date_input("Fecha Fin Contrato", value=hoy + datetime.timedelta(days=365))
-            honorarios_si = st.checkbox("¿Se cobraron honorarios de redacción?")
-            monto_hon = st.number_input("Monto Honorarios ($)", min_value=0.0, step=500.0)
+        with st.form("form_carga"):
+            col1, col2 = st.columns(2)
+            with col1:
+                nombre = st.text_input("Nombre / Identificación de la Propiedad *")
+                direccion = st.text_input("Dirección *")
+                inquilino = st.text_input("Nombre del Inquilino")
+                precio = st.number_input("Precio Inicial del Alquiler ($)", min_value=0.0, step=1000.0)
             
-        notas = st.text_area("Notas Adicionales (Cláusulas especiales, CBU, etc.)")
-        
-        submitted = st.form_submit_button("Guardar Propiedad en el Sistema")
-        if submitted:
-            if not nombre or not direccion:
-                st.error("El nombre de la propiedad y la dirección son obligatorios.")
-            else:
-                conn = obtener_conexion()
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO alquileres (organizacion_id, nombre_propiedad, direccion, inquilino, precio_alquiler, fecha_inicio, fecha_fin, honorarios_cobrados, monto_honorarios, notas)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (org_id_actual, nombre, direccion, inquilino, precio, str(f_inicio), str(f_fin), 1 if honorarios_si else 0, monto_hon, notas))
-                conn.commit()
-                conn.close()
-                st.success("¡Propiedad y contrato guardados con éxito para tu organización!")
-                st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+            with col2:
+                f_inicio = st.date_input("Fecha Inicio Contrato", value=hoy)
+                f_fin = st.date_input("Fecha Fin Contrato", value=hoy + datetime.timedelta(days=365))
+                honorarios_si = st.checkbox("¿Se cobraron honorarios de redacción?")
+                monto_hon = st.number_input("Monto Honorarios ($)", min_value=0.0, step=500.0)
+                
+            notas = st.text_area("Notas Adicionales (Cláusulas especiales, CBU, etc.)")
+            
+            submitted = st.form_submit_button("Guardar Propiedad en el Sistema")
+            if submitted:
+                if not nombre or not direccion:
+                    st.error("El nombre de la propiedad y la dirección son obligatorios.")
+                else:
+                    conn = obtener_conexion()
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO alquileres (organizacion_id, nombre_propiedad, direccion, inquilino, precio_alquiler, fecha_inicio, fecha_fin, honorarios_cobrados, monto_honorarios, notas)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (org_id_actual, nombre, direccion, inquilino, precio, str(f_inicio), str(f_fin), 1 if honorarios_si else 0, monto_hon, notas))
+                    conn.commit()
+                    conn.close()
+                    st.success("¡Propiedad guardada con éxito!")
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "📈 Actualizar Precios e Historial":
     st.markdown("<div class='content-card'>", unsafe_allow_html=True)
@@ -386,35 +432,34 @@ elif opcion == "📈 Actualizar Precios e Historial":
     if df_alquileres.empty:
         st.info("No hay propiedades cargadas.")
     else:
-        propiedad_seleccionada = st.selectbox(
-            "Seleccioná la propiedad:",
-            df_alquileres['nombre_propiedad'].tolist()
-        )
-        
+        propiedad_seleccionada = st.selectbox("Seleccioná la propiedad:", df_alquileres['nombre_propiedad'].tolist())
         prop_info = df_alquileres[df_alquileres['nombre_propiedad'] == propiedad_seleccionada].iloc[0]
         alq_id = prop_info['id']
         
         st.markdown(f"**Dirección:** {prop_info['direccion']} &nbsp;|&nbsp; **Precio Vigente:** <span style='color:#10b981; font-weight:bold;'>${prop_info['precio_alquiler']:,.2f}</span>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
         
-        with st.form("form_precio"):
-            st.subheader("Registrar Nuevo Ajuste")
-            nuevo_precio = st.number_input("Nuevo Monto ($)", min_value=0.0, step=1000.0)
-            fecha_act = st.date_input("Fecha de Actualización", value=hoy)
-            motivo = st.text_input("Motivo / Índice:", value="Actualización ICL / Cuatrimestral")
-            
-            if st.form_submit_button("Guardar Actualización"):
-                conn = obtener_conexion()
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
-                    VALUES (?, ?, ?, ?)
-                ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
-                cursor.execute('UPDATE alquileres SET precio_alquiler = ? WHERE id = ?', (nuevo_precio, alq_id))
-                conn.commit()
-                conn.close()
-                st.success("¡Actualización guardada correctamente!")
-                st.rerun()
+        if not tiene_escritura:
+            st.info("👁️ Estás en modo visualización. Solo los editores pueden registrar modificaciones de precios.")
+        else:
+            with st.form("form_precio"):
+                st.subheader("Registrar Nuevo Ajuste")
+                nuevo_precio = st.number_input("Nuevo Monto ($)", min_value=0.0, step=1000.0)
+                fecha_act = st.date_input("Fecha de Actualización", value=hoy)
+                motivo = st.text_input("Motivo / Índice:", value="Actualización ICL / Cuatrimestral")
+                
+                if st.form_submit_button("Guardar Actualización"):
+                    conn = obtener_conexion()
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO actualizaciones_precio (alquiler_id, fecha_actualizacion, nuevo_precio, motivo)
+                        VALUES (?, ?, ?, ?)
+                    ''', (alq_id, str(fecha_act), nuevo_precio, motivo))
+                    cursor.execute('UPDATE alquileres SET precio_alquiler = ? WHERE id = ?', (nuevo_precio, alq_id))
+                    conn.commit()
+                    conn.close()
+                    st.success("¡Actualización guardada correctamente!")
+                    st.rerun()
 
         st.divider()
         st.subheader("Historial Registrado")
@@ -442,14 +487,12 @@ elif opcion == "🧮 Calculadora de Ajustes (ICL/IPC)":
         
         st.markdown("### 🌐 Enlaces Oficiales de Consulta (BCRA)")
         st.markdown("""
-        Hacé clic para verificar los valores oficiales de los índices según la fecha del contrato:
         - 🔗 [Principales Variables y Series del BCRA](https://www.bcra.gob.ar/principales-variables/)
         - 🔗 [Estadísticas e Indicadores Monetarios (BCRA)](https://www.bcra.gob.ar/)
         """)
         
         st.divider()
-        
-        coef_ingresado = st.number_input("Ingresá el Coeficiente o Porcentaje obtenido de la web oficial (Ej: 1.35 para un 35% de aumento):", min_value=1.0, value=1.30, step=0.01)
+        coef_ingresado = st.number_input("Ingresá el Coeficiente obtenido de la web oficial (Ej: 1.35):", min_value=1.0, value=1.30, step=0.01)
         
         if st.button("Calcular Nuevo Alquiler"):
             nuevo_calculado = precio_actual * coef_ingresado
@@ -460,7 +503,6 @@ elif opcion == "🧮 Calculadora de Ajustes (ICL/IPC)":
             st.divider()
             st.success("¡Cálculo realizado con éxito!")
             st.write(f"- **Coeficiente Aplicado:** {st.session_state['coef_usado']}")
-            st.write(f"- **Monto Anterior:** ${precio_actual:,.2f}")
             st.markdown(f"## 🎯 **Nuevo Alquiler Ajustado: ${st.session_state['nuevo_calculado']:,.2f}**")
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -471,231 +513,206 @@ elif opcion == "💵 Control de Pagos y Recibos":
     if df_alquileres.empty:
         st.info("No hay propiedades registradas.")
     else:
-        p_pago = st.selectbox("Seleccionar Propiedad para Estado de Cuenta:", df_alquileres['nombre_propiedad'].tolist(), key="p_pago_sel")
+        p_pago = st.selectbox("Seleccionar Propiedad:", df_alquileres['nombre_propiedad'].tolist(), key="p_pago_sel")
         prop_reg = df_alquileres[df_alquileres['nombre_propiedad'] == p_pago].iloc[0]
         alq_id_pago = prop_reg['id']
-        
         mes_actual_str = datetime.date.today().strftime("%Y-%m")
         
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            mes_input = st.text_input("Mes y Año del Periodo (YYYY-MM):", value=mes_actual_str)
+            mes_input = st.text_input("Mes y Año (YYYY-MM):", value=mes_actual_str)
             estado_pago = st.selectbox("Estado del Pago:", ["Pagado 🟢", "Pendiente 🔴", "Atrasado ⚠️"])
         with col_p2:
             monto_pago = st.number_input("Monto Abonado ($):", value=float(prop_reg['precio_alquiler']), min_value=0.0)
             fecha_pago_efectiva = st.date_input("Fecha de Efectivización:", value=hoy)
             
-        if st.button("Registrar / Actualizar Estado de Pago"):
-            conn = obtener_conexion()
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM pagos_mensuales WHERE alquiler_id = ? AND mes_anio = ?", (alq_id_pago, mes_input))
-            existe = cursor.fetchone()
-            if existe:
-                cursor.execute("UPDATE pagos_mensuales SET estado = ?, monto = ?, fecha_pago = ? WHERE id = ?", 
-                               (estado_pago, monto_pago, str(fecha_pago_efectiva), existe[0]))
-            else:
-                cursor.execute("INSERT INTO pagos_mensuales (alquiler_id, mes_anio, estado, monto, fecha_pago) VALUES (?, ?, ?, ?, ?)",
-                               (alq_id_pago, mes_input, estado_pago, monto_pago, str(fecha_pago_efectiva)))
-            conn.commit()
-            conn.close()
-            st.success("¡Registro de pago actualizado con éxito!")
-            st.rerun()
+        if not tiene_escritura:
+            st.info("👁️ Estás en modo lectura. No podés registrar pagos nuevos.")
+        else:
+            if st.button("Registrar / Actualizar Estado de Pago"):
+                conn = obtener_conexion()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM pagos_mensuales WHERE alquiler_id = ? AND mes_anio = ?", (alq_id_pago, mes_input))
+                existe = cursor.fetchone()
+                if existe:
+                    cursor.execute("UPDATE pagos_mensuales SET estado = ?, monto = ?, fecha_pago = ? WHERE id = ?", 
+                                   (estado_pago, monto_pago, str(fecha_pago_efectiva), existe[0]))
+                else:
+                    cursor.execute("INSERT INTO pagos_mensuales (alquiler_id, mes_anio, estado, monto, fecha_pago) VALUES (?, ?, ?, ?, ?)",
+                                   (alq_id_pago, mes_input, estado_pago, monto_pago, str(fecha_pago_efectiva)))
+                conn.commit()
+                conn.close()
+                st.success("¡Pago actualizado con éxito!")
+                st.rerun()
 
         st.divider()
         st.subheader("📲 Generador de Recibo Digital para WhatsApp")
-        
-        inquilino_nombre = prop_reg['inquilino'] if prop_reg['inquilino'] else "[Nombre Inquilino]"
+        inquilino_nombre = prop_reg['inquilino'] if prop_reg['inquilino'] else "[Inquilino]"
         texto_whatsapp = f"""*RECIBO DE PAGO - ALQUILER* 🏠
 -----------------------------------
 *Propiedad:* {prop_reg['nombre_propiedad']}
 *Dirección:* {prop_reg['direccion']}
 *Inquilino:* {inquilino_nombre}
-*Periodo Abonado:* {mes_input}
+*Periodo:* {mes_input}
 *Monto:* ${monto_pago:,.2f}
 *Estado:* {estado_pago}
-*Fecha de Pago:* {fecha_pago_efectiva}
+*Fecha:* {fecha_pago_efectiva}
 -----------------------------------
 _Gestión Inmobiliaria Pro_"""
-
-        st.text_area("Copiá este mensaje y envíaselo por WhatsApp al inquilino:", value=texto_whatsapp, height=180)
+        st.text_area("Copiá este mensaje para WhatsApp:", value=texto_whatsapp, height=180)
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "📝 Generador de Contratos":
     st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-    st.header("📝 Generador Automático de Contratos de Locación (.docx)")
+    st.header("📝 Generador Automático de Contratos (.docx)")
     
     if df_alquileres.empty:
-        st.info("No hay propiedades registradas para generar contratos.")
+        st.info("No hay propiedades registradas.")
     else:
-        prop_c = st.selectbox("Seleccionar Inmueble para el Contrato:", df_alquileres['nombre_propiedad'].tolist(), key="prop_contrato")
+        prop_c = st.selectbox("Seleccionar Inmueble:", df_alquileres['nombre_propiedad'].tolist(), key="prop_contrato")
         p_c_info = df_alquileres[df_alquileres['nombre_propiedad'] == prop_c].iloc[0]
         
-        st.write(f"**Dirección:** {p_c_info['direccion']} | **Inquilino actual:** {p_c_info['inquilino']} | **Valor:** ${p_c_info['precio_alquiler']:,.2f}")
-        
-        with st.expander("🛠️ Datos Complementarios de las Partes (Opcional para el Contrato)", expanded=True):
+        with st.expander("🛠️ Datos Complementarios de las Partes", expanded=True):
             col_cc1, col_cc2 = st.columns(2)
             with col_cc1:
-                locador_nombre = st.text_input("Nombre del Locador", value="PROPIETARIO / LOCADOR")
-                locador_dni = st.text_input("DNI Locador", value="[Completar DNI]")
-                locador_dom = st.text_input("Domicilio Locador", value="[Completar Domicilio]")
+                locador_nombre = st.text_input("Nombre Locador", value="PROPIETARIO")
+                locador_dni = st.text_input("DNI Locador", value="[DNI]")
+                locador_dom = st.text_input("Domicilio Locador", value="[Domicilio]")
             with col_cc2:
-                fiador_nombre = st.text_input("Nombre del Fiador / Garante", value="[Completar Garante]")
-                fiador_dni = st.text_input("DNI Fiador", value="[Completar DNI]")
-                fiador_dom = st.text_input("Domicilio Fiador", value="[Completar Domicilio]")
+                fiador_nombre = st.text_input("Nombre Garante", value="[Garante]")
+                fiador_dni = st.text_input("DNI Garante", value="[DNI]")
+                fiador_dom = st.text_input("Domicilio Garante", value="[Domicilio]")
 
         contrato_modelo_base = f"""CONTRATO DE LOCACIÓN DE INMUEBLE
-Entre el Sr. {locador_nombre}, Documento de Identidad N° {locador_dni}, con domicilio en calle {locador_dom}, por una parte y en adelante denominado “el locador”, y por la otra parte el Sr./Sra. {p_c_info['inquilino']} con D.N.I. Nº [Completar DNI] con domicilio en {p_c_info['direccion']}, Pergamino, en adelante denominado “el locatario”, se conviene en celebrar el presente contrato de locación de inmueble sujeto a las siguientes cláusulas y condiciones:
+Entre el Sr. {locador_nombre}, DNI N° {locador_dni}, con domicilio en {locador_dom}, en adelante “el locador”, y el Sr./Sra. {p_c_info['inquilino']} con D.N.I. Nº [Completar] con domicilio en {p_c_info['direccion']}, en adelante “el locatario”, se conviene celebrar el presente contrato:
 
-PRIMERA: El locador da en locación al locatario el inmueble de su propiedad ubicado en {p_c_info['direccion']} de la ciudad de Pergamino, destinado a vivienda, el cual se entrega en perfectas condiciones de uso y funcionamiento, tal como se recibe en este acto, obligándose a devolverlo al término del contrato en iguales condiciones.
+PRIMERA: El locador da en locación el inmueble ubicado en {p_c_info['direccion']} destinado a vivienda.
+SEGUNDA: El plazo será de dos (2) años desde el {p_c_info['fecha_inicio']} hasta el {p_c_info['fecha_fin']}.
+TERCERA: El valor mensual se fija en la suma de PESOS (${p_c_info['precio_alquiler']:,.2f}), actualizable trimestralmente por índice ICL.
 
-SEGUNDA: El plazo de la presente locación será de dos (2) años contados desde el {p_c_info['fecha_inicio']}, por lo que su vencimiento se producirá de pleno derecho el día {p_c_info['fecha_fin']}, sin necesidad de notificación o requerimiento alguno por parte del locador.
+En prueba de conformidad, se firman dos ejemplares."""
 
-TERCERA: El valor locativo mensual se conviene en la suma de PESOS (${p_c_info['precio_alquiler']:,.2f}) pagaderos mensualmente y por mes adelantado dentro del 1ro. al 10mo. día de cada mes, en el lugar que el LOCADOR indique mediante notificación fehaciente. El canon se actualizará trimestralmente utilizando el Índice para Contratos de Locación (ICL) publicado por el Banco Central de la República Argentina.
+        texto_editado = st.text_area("Contrato Editable:", value=contrato_modelo_base, height=300)
 
-CUARTA: En el caso de mora en el pago mensual, el LOCATARIO abonará al LOCADOR como interés punitorio el 2% acumulativo por cada día de retraso.
-
-QUINTA: El locatario recibe el inmueble desocupado y en perfectas condiciones de habitabilidad, obligándose a restituirlo en el mismo estado.
-
-SEXTA: Al locatario le está expresamente prohibido subarrendar en todo o en parte el inmueble y ceder el presente contrato bajo pena de rescisión.
-
-SÉPTIMA: El locatario deberá abonar además del canon locativo los servicios de electricidad, gas natural, servicios sanitarios y tasas municipales.
-
-OCTAVA: El locador no se responsabiliza por los daños derivados de desperfectos originados en la falta de mantenimiento de la vivienda.
-
-NOVENA: La falta de pago del alquiler por dos (2) meses seguidos o tres (3) alternados dará opción al locador a resolver el contrato y demandar el desalojo.
-
-DECIMA: El locatario podrá rescindir anticipadamente el presente contrato notificando fehacientemente con sesenta (60) días de antelación y abonando la indemnización legal correspondiente.
-
-DECIMO PRIMERA: El Impuesto de Sellos del presente contrato será abonado en su totalidad por parte del locatario.
-
-DECIMO SEGUNDA: El locador tendrá derecho a visitar cada sesenta días y con previo aviso el inmueble locado para verificar su estado de conservación.
-
-DECIMO TERCERA: La Sra. {fiador_nombre}, DNI Nº {fiador_dni}, con domicilio en {fiador_dom} se constituye por el presente en fiador solidario, liso, llano y principal pagador de todas las obligaciones contraídas.
-
-DECIMO CUARTA: Para todos los efectos legales, las partes constituyen domicilios especiales en los lugares indicados y se someten a la competencia de los Tribunales Ordinarios de la ciudad de Pergamino.
-
-En prueba de conformidad, se firman dos ejemplares de un mismo tenor y a un solo efecto en la ciudad de Pergamino."""
-
-        st.subheader("👁️ Vista Previa y Edición Fina del Contrato")
-        texto_editado = st.text_area("Contrato Editable:", value=contrato_modelo_base, height=350)
-
-        if st.button("📥 Generar y Descargar Contrato en formato Word (.docx)"):
+        if st.button("📥 Descargar Contrato en Word (.docx)"):
             doc = Document()
             doc.add_heading(f"Contrato - {p_c_info['nombre_propiedad']}", level=1)
             for parrafo in texto_editado.split("\n\n"):
                 if parrafo.strip():
                     doc.add_paragraph(parrafo.strip())
-            
             bio = io.BytesIO()
             doc.save(bio)
             bio.seek(0)
-            
-            nombre_archivo = f"Contrato_{p_c_info['nombre_propiedad'].replace(' ', '_')}.docx"
-            
             st.download_button(
-                label="⬇️ Hacer clic aquí para descargar el archivo .docx",
+                label="⬇️ Descargar archivo .docx",
                 data=bio,
-                file_name=nombre_archivo,
+                file_name=f"Contrato_{p_c_info['nombre_propiedad'].replace(' ', '_')}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
-            st.success("¡Documento listo para descargar e imprimir!")
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif opcion == "🗑️ Eliminar Propiedad":
-    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-    st.header("🗑️ Baja de Propiedades y Contratos")
-    
-    if df_alquileres.empty:
-        st.info("No hay propiedades registradas en la base de datos.")
+    if not tiene_escritura:
+        st.error("🔒 Tu cuenta tiene perfil de **Solo Lectura**.")
     else:
-        prop_a_borrar = st.selectbox("Seleccioná la propiedad que querés dar de baja:", df_alquileres['nombre_propiedad'].tolist())
-        p_del_info = df_alquileres[df_alquileres['nombre_propiedad'] == prop_a_borrar].iloc[0]
-        prop_id = p_del_info['id']
+        st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+        st.header("🗑️ Baja de Propiedades y Contratos")
         
-        st.error(f"⚠️ Atención: Estás por eliminar el registro de **{p_del_info['nombre_propiedad']}** (Dirección: {p_del_info['direccion']}). Esta acción también borrará su historial de precios y pagos asociados.")
+        if df_alquileres.empty:
+            st.info("No hay propiedades registradas.")
+        else:
+            prop_a_borrar = st.selectbox("Seleccioná la propiedad a eliminar:", df_alquileres['nombre_propiedad'].tolist())
+            p_del_info = df_alquileres[df_alquileres['nombre_propiedad'] == prop_a_borrar].iloc[0]
+            prop_id = p_del_info['id']
+            
+            st.error(f"⚠️ Atención: Estás por eliminar **{p_del_info['nombre_propiedad']}**.")
+            confirmacion = st.checkbox("Confirmo que deseo dar de baja definitivamente este inmueble.")
+            
+            if st.button("Eliminar Inmueble"):
+                if confirmacion:
+                    conn = obtener_conexion()
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM actualizaciones_precio WHERE alquiler_id = ?", (prop_id,))
+                    cursor.execute("DELETE FROM pagos_mensuales WHERE alquiler_id = ?", (prop_id,))
+                    cursor.execute("DELETE FROM alquileres WHERE id = ?", (prop_id,))
+                    conn.commit()
+                    conn.close()
+                    st.success("¡Propiedad eliminada!")
+                    st.rerun()
+                else:
+                    st.warning("Marcá la casilla de confirmación.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+elif opcion == "👥 Gestión de Miembros del Equipo" and (user_info['es_admin_general'] == 1 or user_info['es_admin_org'] == 1):
+    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+    st.header("👥 Gestión de Miembros de tu Organización")
+    st.write("Agregá colaboradores a tu organización y asignales permisos de edición o solo lectura.")
+    
+    with st.form("form_nuevo_colab"):
+        c_email = st.text_input("Correo electrónico del colaborador")
+        c_pass = st.text_input("Contraseña temporal", type="password")
+        c_nombre = st.text_input("Nombre y Apellido")
+        c_escritura = st.checkbox("¿Permitir permisos de Escritura / Edición?", value=True)
         
-        confirmacion = st.checkbox("Confirmo que deseo dar de baja definitivamente este inmueble.")
-        
-        if st.button("Eliminar Inmueble de la Base de Datos"):
-            if confirmacion:
-                conn = obtener_conexion()
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM actualizaciones_precio WHERE alquiler_id = ?", (prop_id,))
-                cursor.execute("DELETE FROM pagos_mensuales WHERE alquiler_id = ?", (prop_id,))
-                cursor.execute("DELETE FROM alquileres WHERE id = ?", (prop_id,))
-                conn.commit()
-                conn.close()
-                st.success("¡Propiedad eliminada correctamente!")
-                st.rerun()
+        btn_crear_c = st.form_submit_button("Crear Colaborador")
+        if btn_crear_c:
+            if c_email and c_pass and c_nombre:
+                try:
+                    conn = obtener_conexion()
+                    cursor = conn.cursor()
+                    pass_enc = encriptar_password(c_pass)
+                    cursor.execute('''
+                        INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general, es_admin_org, permiso_escritura, aprobado)
+                        VALUES (?, ?, ?, ?, 0, 0, ?, 1)
+                    ''', (c_email, pass_enc, c_nombre, org_id_actual, 1 if c_escritura else 0))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"¡Colaborador {c_nombre} creado con éxito y habilitado!")
+                except sqlite3.IntegrityError:
+                    st.error("El correo electrónico ya está registrado.")
             else:
-                st.warning("Por favor, marcá la casilla de confirmación para habilitar la eliminación.")
+                st.warning("Completá todos los campos.")
+
+    st.divider()
+    st.subheader("Miembros actuales de tu Organización:")
+    conn = obtener_conexion()
+    df_miembros = pd.read_sql("SELECT nombre_completo AS Nombre, email AS Correo, CASE WHEN permiso_escritura=1 THEN 'Editor ✍️' ELSE 'Solo Lectura 👁️' END AS Permisos FROM usuarios WHERE organizacion_id = ?", conn, params=(org_id_actual,))
+    conn.close()
+    st.dataframe(df_miembros, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-elif opcion == "👥 Gestión de Usuarios y Orgs" and user_info['es_admin'] == 1:
+elif opcion == "🛡️ Aprobación de Cuentas (Admin)" and user_info['es_admin_general'] == 1:
     st.markdown("<div class='content-card'>", unsafe_allow_html=True)
-    st.header("👥 Panel de Administración General (Organizaciones y Usuarios)")
+    st.header("🛡️ Panel Superadministrador - Aprobación de Nuevas Cuentas")
     
-    tab1, tab2 = st.tabs(["Crear Organización / Empresa", "Crear Nuevo Usuario"])
+    conn = obtener_conexion()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT u.id, u.nombre_completo, u.email, o.nombre_org 
+        FROM usuarios u 
+        JOIN organizaciones o ON u.organizacion_id = o.id 
+        WHERE u.aprobado = 0
+    ''')
+    pendientes = cursor.fetchall()
+    conn.close()
     
-    with tab1:
-        st.subheader("Registrar Nueva Organización")
-        with st.form("form_nueva_org"):
-            nombre_nueva_org = st.text_input("Nombre de la Organización / Estudio / Inmobiliaria")
-            btn_crear_org = st.form_submit_button("Crear Organización")
-            
-            if btn_crear_org:
-                if nombre_nueva_org:
-                    try:
-                        conn = obtener_conexion()
-                        cursor = conn.cursor()
-                        cursor.execute("INSERT INTO organizaciones (nombre_org) VALUES (?)", (nombre_nueva_org,))
-                        conn.commit()
-                        conn.close()
-                        st.success(f"¡Organización '{nombre_nueva_org}' creada con éxito!")
-                        st.rerun()
-                    except sqlite3.IntegrityError:
-                        st.error("Esa organización ya existe.")
-                else:
-                    st.warning("Ingresá un nombre válido.")
-
-    with tab2:
-        st.subheader("Registrar Usuario para una Organización")
-        
-        conn = obtener_conexion()
-        orgs_disponibles = pd.read_sql("SELECT id, nombre_org FROM organizaciones", conn)
-        conn.close()
-        
-        if orgs_disponibles.empty:
-            st.warning("Primero debés crear al menos una organización en la pestaña anterior.")
-        else:
-            with st.form("form_nuevo_usuario"):
-                nuevo_email = st.text_input("Correo electrónico del usuario")
-                nuevo_pass = st.text_input("Contraseña temporal", type="password")
-                nuevo_nombre = st.text_input("Nombre y Apellido del usuario")
-                
-                org_dict = dict(zip(orgs_disponibles['nombre_org'], orgs_disponibles['id']))
-                org_seleccionada = st.selectbox("Organización a la que pertenece", list(org_dict.keys()))
-                
-                es_admin_org = st.checkbox("¿Es Administrador de esta Organización?")
-                
-                btn_crear_usu = st.form_submit_button("Crear Usuario")
-                
-                if btn_crear_usu:
-                    if nuevo_email and nuevo_pass and nuevo_nombre:
-                        org_id_elegida = org_dict[org_seleccionada]
-                        pass_encriptada = encriptar_password(nuevo_pass)
-                        try:
-                            conn = obtener_conexion()
-                            cursor = conn.cursor()
-                            cursor.execute('''
-                                INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general)
-                                VALUES (?, ?, ?, ?, ?)
-                            ''', (nuevo_email, pass_encriptada, nuevo_nombre, org_id_elegida, 1 if es_admin_org else 0))
-                            conn.commit()
-                            conn.close()
-                            st.success(f"¡Usuario {nuevo_email} creado con éxito para la organización!")
-                        except sqlite3.IntegrityError:
-                            st.error("El correo electrónico ya se encuentra registrado.")
-                    else:
-                        st.warning("Completá todos los campos obligatorios.")
+    if not pendientes:
+        st.info("No hay solicitudes de cuentas pendientes de aprobación en este momento.")
+    else:
+        st.write("Las siguientes organizaciones solicitaron acceso a la plataforma:")
+        for p in pendientes:
+            col_ap1, col_ap2, col_ap3 = st.columns([2, 2, 1])
+            with col_ap1:
+                st.markdown(f"**{p[1]}** ({p[2]})")
+            with col_ap2:
+                st.markdown(f"Organización: <b>{p[3]}</b>", unsafe_allow_html=True)
+            with col_ap3:
+                if st.button(f"Aprobar ID {p[0]}", key=f"aprobar_{p[0]}"):
+                    conn = obtener_conexion()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE usuarios SET aprobado = 1 WHERE id = ?", (p[0],))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"¡Cuenta aprobada con éxito!")
+                    st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
