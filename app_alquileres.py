@@ -4,48 +4,136 @@ import datetime
 import pandas as pd
 import os
 import io
+import hashlib
 from docx import Document
 
 # --- Configuración de la página ---
 st.set_page_config(
-    page_title="Gestor Inmobiliario - Estudio Jurídico Risso",
-    page_icon="⚖️",
+    page_title="Gestor Inmobiliario Pro",
+    page_icon="🏢",
     layout="wide"
 )
 
-# --- Estética Visual "Dark SaaS Pro" Definitiva ---
+# --- Función para encriptar contraseñas por seguridad ---
+def encriptar_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# --- Base de Datos y Estructura Multiusuario ---
+def obtener_conexion():
+    carpeta_actual = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
+    ruta_db = os.path.join(carpeta_actual, 'mis_alquileres_pro.db')
+    return sqlite3.connect(ruta_db)
+
+def inicializar_bd():
+    conn = obtener_conexion()
+    cursor = conn.cursor()
+    
+    # Tabla de Organizaciones
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS organizaciones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre_org TEXT NOT NULL UNIQUE
+        )
+    ''')
+    
+    # Tabla de Usuarios
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            nombre_completo TEXT,
+            organizacion_id INTEGER,
+            es_admin_general INTEGER DEFAULT 0,
+            FOREIGN KEY (organizacion_id) REFERENCES organizaciones (id)
+        )
+    ''')
+    
+    # Tabla de Alquileres (Vinculada a Organización)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alquileres (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            organizacion_id INTEGER,
+            nombre_propiedad TEXT NOT NULL,
+            direccion TEXT NOT NULL,
+            inquilino TEXT,
+            precio_alquiler REAL DEFAULT 0.0,
+            fecha_inicio TEXT,
+            fecha_fin TEXT,
+            honorarios_cobrados INTEGER DEFAULT 0,
+            monto_honorarios REAL DEFAULT 0.0,
+            notas TEXT,
+            FOREIGN KEY (organizacion_id) REFERENCES organizaciones (id)
+        )
+    ''')
+    
+    # Tabla de Actualizaciones de Precios
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS actualizaciones_precio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alquiler_id INTEGER,
+            fecha_actualizacion TEXT,
+            nuevo_precio REAL,
+            motivo TEXT,
+            FOREIGN KEY (alquiler_id) REFERENCES alquileres (id)
+        )
+    ''')
+    
+    # Tabla de Pagos Mensuales
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pagos_mensuales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alquiler_id INTEGER,
+            mes_anio TEXT,
+            estado TEXT,
+            monto REAL,
+            fecha_pago TEXT,
+            FOREIGN KEY (alquiler_id) REFERENCES alquileres (id)
+        )
+    ''')
+    
+    # Crear un usuario Administrador Maestro por defecto si no existe ninguno
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT OR IGNORE INTO organizaciones (nombre_org) VALUES ('Administración Central')")
+        cursor.execute("SELECT id FROM organizaciones WHERE nombre_org = 'Administración Central'")
+        org_id = cursor.fetchone()[0]
+        
+        pass_maestro = encriptar_password("admin123")
+        cursor.execute('''
+            INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general)
+            VALUES (?, ?, ?, ?, ?)
+        ''', ("admin@gestor.com", pass_maestro, "Administrador Maestro", org_id, 1))
+        conn.commit()
+
+    conn.close()
+
+inicializar_bd()
+
+# --- Estética Visual "Dark SaaS Pro" ---
 st.markdown("""
     <style>
-    /* Fondo general oscuro estilo panel corporativo */
     .stApp {
         background-color: #0e1621;
         color: #f1f5f9;
     }
-    
-    /* Tipografías institucionales generales y títulos */
     h1, h2, h3, h4, p, span {
         font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
     }
     h1, h2, h3 {
         color: #ffffff !important;
     }
-    
-    /* Forzar que CUALQUIER etiqueta (label) de los inputs sea visible y clara */
     label, .stTextInput label, .stNumberInput label, .stSelectbox label, .stDateInput label, .stTextArea label, .stCheckbox label {
         color: #e2e8f0 !important;
         font-weight: 600 !important;
         font-size: 14px !important;
     }
-    
-    /* CORRECCIÓN CRÍTICA: Forzar fondo oscuro y letra blanca en TODOS los text_area */
     textarea, .stTextArea textarea {
         background-color: #131c2a !important;
         color: #ffffff !important;
         border: 1px solid #334155 !important;
         border-radius: 8px !important;
     }
-    
-    /* Barra lateral institucional oscura tipo SaaS */
     [data-testid="stSidebar"] {
         background-color: #131c2a;
         border-right: 1px solid #1e293b;
@@ -58,8 +146,6 @@ st.markdown("""
     [data-testid="stSidebar"] hr {
         border-color: #1e293b;
     }
-
-    /* Tarjetas de métricas estilo oscuro */
     .metric-card {
         background-color: #162235;
         padding: 20px;
@@ -69,8 +155,6 @@ st.markdown("""
         border-left: 5px solid #10b981;
         margin-bottom: 15px;
     }
-
-    /* Contenedores con estilo de tarjeta limpia oscura */
     .content-card {
         background-color: #162235;
         padding: 24px;
@@ -79,8 +163,6 @@ st.markdown("""
         margin-bottom: 20px;
         border: 1px solid #1e293b;
     }
-
-    /* Botones principales corporativos con diseño moderno */
     .stButton>button {
         background-color: #10b981;
         color: #0e1621;
@@ -97,16 +179,12 @@ st.markdown("""
         box-shadow: 0 6px 15px rgba(16, 185, 129, 0.4);
         transform: translateY(-1px);
     }
-    
-    /* Estilo robusto para inputs y selectores en modo oscuro */
     .stTextInput input, .stNumberInput input, .stSelectbox [data-baseweb="select"] {
         background-color: #131c2a !important;
         color: #ffffff !important;
         border: 1px solid #334155 !important;
         border-radius: 8px !important;
     }
-    
-    /* Tablas y dataframes en modo oscuro */
     [data-testid="stDataFrame"] {
         border: 1px solid #1e293b;
         border-radius: 8px;
@@ -114,67 +192,67 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Base de Datos ---
-def obtener_conexion():
-    carpeta_actual = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-    ruta_db = os.path.join(carpeta_actual, 'mis_alquileres_pro.db')
-    return sqlite3.connect(ruta_db)
+# --- Control de Sesión ---
+if 'usuario_logueado' not in st.session_state:
+    st.session_state['usuario_logueado'] = None
 
-def inicializar_bd():
-    conn = obtener_conexion()
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS alquileres (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre_propiedad TEXT NOT NULL,
-            direccion TEXT NOT NULL,
-            inquilino TEXT,
-            precio_alquiler REAL DEFAULT 0.0,
-            fecha_inicio TEXT,
-            fecha_fin TEXT,
-            honorarios_cobrados INTEGER DEFAULT 0,
-            monto_honorarios REAL DEFAULT 0.0,
-            notas TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS actualizaciones_precio (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alquiler_id INTEGER,
-            fecha_actualizacion TEXT,
-            nuevo_precio REAL,
-            motivo TEXT,
-            FOREIGN KEY (alquiler_id) REFERENCES alquileres (id)
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS pagos_mensuales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alquiler_id INTEGER,
-            mes_anio TEXT,
-            estado TEXT,
-            monto REAL,
-            fecha_pago TEXT,
-            FOREIGN KEY (alquiler_id) REFERENCES alquileres (id)
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# --- Pantalla de Login si no hay sesión activa ---
+if st.session_state['usuario_logueado'] is None:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col_l1, col_l2, col_l3 = st.columns([1, 1.5, 1])
+    with col_l2:
+        st.markdown("""
+            <div style='text-align: center; padding: 30px; background: #162235; border-radius: 15px; border: 1px solid #1e293b; box-shadow: 0 8px 25px rgba(0,0,0,0.4);'>
+                <div style='font-size: 45px; margin-bottom: 10px;'>🏢</div>
+                <h2 style='color: #ffffff !important; margin: 0;'>Gestor Inmobiliario Pro</h2>
+                <p style='color: #94a3b8; font-size: 13px; margin-top: 5px;'>Iniciá sesión para acceder a tu organización</p>
+            </div>
+        """, unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        with st.form("form_login"):
+            email_ingresado = st.text_input("Correo Electrónico")
+            pass_ingresado = st.text_input("Contraseña", type="password")
+            btn_login = st.form_submit_button("Ingresar al Sistema")
+            
+            if btn_login:
+                conn = obtener_conexion()
+                cursor = conn.cursor()
+                pass_hash = encriptar_password(pass_ingresado)
+                cursor.execute("SELECT id, email, nombre_completo, organizacion_id, es_admin_general FROM usuarios WHERE email = ? AND password = ?", (email_ingresado, pass_hash))
+                user = cursor.fetchone()
+                conn.close()
+                
+                if user:
+                    st.session_state['usuario_logueado'] = {
+                        "id": user[0],
+                        "email": user[1],
+                        "nombre": user[2],
+                        "org_id": user[3],
+                        "es_admin": user[4]
+                    }
+                    st.success("¡Ingreso exitoso! Redirigindo...")
+                    st.rerun()
+                else:
+                    st.error("Credenciales incorrectas. Verificá tu mail y contraseña.")
+        
+        st.info("💡 **Acceso inicial por defecto:** Usuario: `admin@gestor.com` | Contraseña: `admin123`")
+    st.stop()
 
-inicializar_bd()
+# --- Usuario Ya Logueado: Interfaz Principal ---
+user_info = st.session_state['usuario_logueado']
+org_id_actual = user_info['org_id']
 
-# --- Menú Lateral Profesional Dark ---
 with st.sidebar:
-    st.markdown("""
-        <div style='text-align: center; padding: 20px 10px; background: linear-gradient(135deg, #162235 0%, #0e1621 100%); border-radius: 10px; border: 1px solid #1e293b; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);'>
-            <div style='font-size: 35px; margin-bottom: 5px;'>⚖️</div>
-            <h2 style='color: #ffffff !important; margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.5px;'>ESTUDIO JURÍDICO</h2>
-            <h1 style='color: #10b981 !important; margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 1px;'>RISSO</h1>
-            <p style='font-size: 9px; color: #94a3b8; margin-top: 8px; text-transform: uppercase; letter-spacing: 1.5px;'>Gestión Inmobiliaria Pro</p>
+    st.markdown(f"""
+        <div style='text-align: center; padding: 15px; background: linear-gradient(135deg, #162235 0%, #0e1621 100%); border-radius: 10px; border: 1px solid #1e293b; margin-bottom: 15px;'>
+            <div style='font-size: 30px;'>🏢</div>
+            <h3 style='color: #ffffff !important; margin: 5px 0 0 0; font-size: 16px;'>Gestor Inmobiliario</h3>
+            <p style='font-size: 11px; color: #10b981; margin: 5px 0 0 0;'><b>{user_info['nombre']}</b></p>
         </div>
     """, unsafe_allow_html=True)
     
-    opcion = st.radio("Navegación del Sistema:", [
+    menu_opciones = [
         "📊 Panel y Gráficos", 
         "➕ Cargar Propiedad", 
         "📈 Actualizar Precios e Historial", 
@@ -182,10 +260,22 @@ with st.sidebar:
         "💵 Control de Pagos y Recibos",
         "📝 Generador de Contratos",
         "🗑️ Eliminar Propiedad"
-    ])
+    ]
+    
+    # Si es administrador general, agregamos la solapa de gestión de usuarios/organizaciones
+    if user_info['es_admin'] == 1:
+        menu_opciones.append("👥 Gestión de Usuarios y Orgs")
 
+    opcion = st.radio("Navegación del Sistema:", menu_opciones)
+    
+    st.markdown("---")
+    if st.button("🚪 Cerrar Sesión"):
+        st.session_state['usuario_logueado'] = None
+        st.rerun()
+
+# Cargar datos filtrados exclusivamente por la organización del usuario actual
 conn = obtener_conexion()
-df_alquileres = pd.read_sql("SELECT * FROM alquileres", conn)
+df_alquileres = pd.read_sql("SELECT * FROM alquileres WHERE organizacion_id = ?", conn, params=(org_id_actual,))
 conn.close()
 
 hoy = datetime.date.today()
@@ -195,12 +285,12 @@ if opcion == "📊 Panel y Gráficos":
     st.markdown("""
         <div style='padding: 22px; background: linear-gradient(90deg, #162235 0%, #1e293b 100%); border-radius: 10px; color: white; margin-bottom: 20px; border: 1px solid #2a3b50; box-shadow: 0 4px 15px rgba(0,0,0,0.2);'>
             <h1 style='color: #ffffff !important; margin: 0; font-size: 26px; font-weight: 700;'>Panel General de Administración</h1>
-            <p style='color: #94a3b8; margin: 5px 0 0 0; font-size: 13px;'>Control centralizado de contratos, valores vigentes y estadísticas clave del estudio.</p>
+            <p style='color: #94a3b8; margin: 5px 0 0 0; font-size: 13px;'>Control centralizado de propiedades e ingresos de tu organización.</p>
         </div>
     """, unsafe_allow_html=True)
     
     if df_alquileres.empty:
-        st.info("Todavía no hay propiedades cargadas en el sistema. Utiliza la sección '➕ Cargar Propiedad' para comenzar.")
+        st.info("Todavía no hay propiedades cargadas para tu organización. Utiliza '➕ Cargar Propiedad' para comenzar.")
     else:
         total_propiedades = len(df_alquileres)
         recaudacion_potencial = df_alquileres['precio_alquiler'].sum()
@@ -280,12 +370,12 @@ elif opcion == "➕ Cargar Propiedad":
                 conn = obtener_conexion()
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT INTO alquileres (nombre_propiedad, direccion, inquilino, precio_alquiler, fecha_inicio, fecha_fin, honorarios_cobrados, monto_honorarios, notas)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (nombre, direccion, inquilino, precio, str(f_inicio), str(f_fin), 1 if honorarios_si else 0, monto_hon, notas))
+                    INSERT INTO alquileres (organizacion_id, nombre_propiedad, direccion, inquilino, precio_alquiler, fecha_inicio, fecha_fin, honorarios_cobrados, monto_honorarios, notas)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (org_id_actual, nombre, direccion, inquilino, precio, str(f_inicio), str(f_fin), 1 if honorarios_si else 0, monto_hon, notas))
                 conn.commit()
                 conn.close()
-                st.success("¡Propiedad y contrato guardados con éxito!")
+                st.success("¡Propiedad y contrato guardados con éxito para tu organización!")
                 st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -425,7 +515,7 @@ elif opcion == "💵 Control de Pagos y Recibos":
 *Estado:* {estado_pago}
 *Fecha de Pago:* {fecha_pago_efectiva}
 -----------------------------------
-_Estudio Jurídico Risso - Gestión Inmobiliaria_"""
+_Gestión Inmobiliaria Pro_"""
 
         st.text_area("Copiá este mensaje y envíaselo por WhatsApp al inquilino:", value=texto_whatsapp, height=180)
     st.markdown("</div>", unsafe_allow_html=True)
@@ -445,13 +535,13 @@ elif opcion == "📝 Generador de Contratos":
         with st.expander("🛠️ Datos Complementarios de las Partes (Opcional para el Contrato)", expanded=True):
             col_cc1, col_cc2 = st.columns(2)
             with col_cc1:
-                locador_nombre = st.text_input("Nombre del Locador", value="JUAN JOSE GARCIA")
-                locador_dni = st.text_input("DNI Locador", value="4.679.131")
-                locador_dom = st.text_input("Domicilio Locador", value="Echeverría 229 de Pergamino")
+                locador_nombre = st.text_input("Nombre del Locador", value="PROPIETARIO / LOCADOR")
+                locador_dni = st.text_input("DNI Locador", value="[Completar DNI]")
+                locador_dom = st.text_input("Domicilio Locador", value="[Completar Domicilio]")
             with col_cc2:
-                fiador_nombre = st.text_input("Nombre del Fiador / Garante", value="MONICA VIVIANA RAIMUNDO")
-                fiador_dni = st.text_input("DNI Fiador", value="23.690.839")
-                fiador_dom = st.text_input("Domicilio Fiador", value="Av. Colon Nº 525, Planta Alta, Pergamino")
+                fiador_nombre = st.text_input("Nombre del Fiador / Garante", value="[Completar Garante]")
+                fiador_dni = st.text_input("DNI Fiador", value="[Completar DNI]")
+                fiador_dom = st.text_input("Domicilio Fiador", value="[Completar Domicilio]")
 
         contrato_modelo_base = f"""CONTRATO DE LOCACIÓN DE INMUEBLE
 Entre el Sr. {locador_nombre}, Documento de Identidad N° {locador_dni}, con domicilio en calle {locador_dom}, por una parte y en adelante denominado “el locador”, y por la otra parte el Sr./Sra. {p_c_info['inquilino']} con D.N.I. Nº [Completar DNI] con domicilio en {p_c_info['direccion']}, Pergamino, en adelante denominado “el locatario”, se conviene en celebrar el presente contrato de locación de inmueble sujeto a las siguientes cláusulas y condiciones:
@@ -541,3 +631,71 @@ elif opcion == "🗑️ Eliminar Propiedad":
                 st.warning("Por favor, marcá la casilla de confirmación para habilitar la eliminación.")
     st.markdown("</div>", unsafe_allow_html=True)
 
+elif opcion == "👥 Gestión de Usuarios y Orgs" and user_info['es_admin'] == 1:
+    st.markdown("<div class='content-card'>", unsafe_allow_html=True)
+    st.header("👥 Panel de Administración General (Organizaciones y Usuarios)")
+    
+    tab1, tab2 = st.tabs(["Crear Organización / Empresa", "Crear Nuevo Usuario"])
+    
+    with tab1:
+        st.subheader("Registrar Nueva Organización")
+        with st.form("form_nueva_org"):
+            nombre_nueva_org = st.text_input("Nombre de la Organización / Estudio / Inmobiliaria")
+            btn_crear_org = st.form_submit_button("Crear Organización")
+            
+            if btn_crear_org:
+                if nombre_nueva_org:
+                    try:
+                        conn = obtener_conexion()
+                        cursor = conn.cursor()
+                        cursor.execute("INSERT INTO organizaciones (nombre_org) VALUES (?)", (nombre_nueva_org,))
+                        conn.commit()
+                        conn.close()
+                        st.success(f"¡Organización '{nombre_nueva_org}' creada con éxito!")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("Esa organización ya existe.")
+                else:
+                    st.warning("Ingresá un nombre válido.")
+
+    with tab2:
+        st.subheader("Registrar Usuario para una Organización")
+        
+        conn = obtener_conexion()
+        orgs_disponibles = pd.read_sql("SELECT id, nombre_org FROM organizaciones", conn)
+        conn.close()
+        
+        if orgs_disponibles.empty:
+            st.warning("Primero debés crear al menos una organización en la pestaña anterior.")
+        else:
+            with st.form("form_nuevo_usuario"):
+                nuevo_email = st.text_input("Correo electrónico del usuario")
+                nuevo_pass = st.text_input("Contraseña temporal", type="password")
+                nuevo_nombre = st.text_input("Nombre y Apellido del usuario")
+                
+                org_dict = dict(zip(orgs_disponibles['nombre_org'], orgs_disponibles['id']))
+                org_seleccionada = st.selectbox("Organización a la que pertenece", list(org_dict.keys()))
+                
+                es_admin_org = st.checkbox("¿Es Administrador de esta Organización?")
+                
+                btn_crear_usu = st.form_submit_button("Crear Usuario")
+                
+                if btn_crear_usu:
+                    if nuevo_email and nuevo_pass and nuevo_nombre:
+                        org_id_elegida = org_dict[org_seleccionada]
+                        pass_encriptada = encriptar_password(nuevo_pass)
+                        try:
+                            conn = obtener_conexion()
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                INSERT INTO usuarios (email, password, nombre_completo, organizacion_id, es_admin_general)
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', (nuevo_email, pass_encriptada, nuevo_nombre, org_id_elegida, 1 if es_admin_org else 0))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"¡Usuario {nuevo_email} creado con éxito para la organización!")
+                        except sqlite3.IntegrityError:
+                            st.error("El correo electrónico ya se encuentra registrado.")
+                    else:
+                        st.warning("Completá todos los campos obligatorios.")
+    st.markdown("</div>", unsafe_allow_html=True)
